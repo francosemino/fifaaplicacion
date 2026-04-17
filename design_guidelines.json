@@ -1,0 +1,114 @@
+{
+  "theme": "dark",
+  "archetype": "5 (Jewel & Luxury) with Gaming Elements",
+  "typography": {
+    "headings": {
+      "font_family": "Unbounded",
+      "weights": ["300", "700", "900"],
+      "usage": "Use tight letter spacing (tracking-tighter) for all H1/H2. Never use Inter. Apply for player names, tournament titles, and major stats."
+    },
+    "body": {
+      "font_family": "Manrope",
+      "weights": ["400", "500", "600"],
+      "usage": "Use for all lists, head-to-head details, and dense data."
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h3": "text-xl font-semibold",
+      "body": "text-base",
+      "labels": "text-xs font-bold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "background": {
+      "default": "#0A0B0E",
+      "surface": "#12141A",
+      "surface_elevated": "#1A1D27"
+    },
+    "text": {
+      "primary": "#F5F6FA",
+      "secondary": "#9E9FA6",
+      "muted": "#5A5D6B"
+    },
+    "accents": {
+      "gold": "bg-gradient-to-br from-[#F5D76E] via-[#D4AF37] to-[#AA8111]",
+      "silver": "bg-gradient-to-br from-[#E2E8F0] via-[#94A3B8] to-[#475569]",
+      "bronze": "bg-gradient-to-br from-[#FDBA74] via-[#B45309] to-[#78350F]",
+      "primary": "#D4AF37",
+      "danger": "#EF4444",
+      "success": "#10B981"
+    },
+    "borders": {
+      "default": "#2A2D3A",
+      "focus": "#D4AF37"
+    }
+  },
+  "surfaces": {
+    "cards": {
+      "style": "Neumorphism / Tactile Variant",
+      "classes": "bg-[#12141A] border border-[#2A2D3A] rounded-2xl shadow-lg",
+      "hover": "hover:-translate-y-1 hover:border-[#D4AF37]/50 transition-all duration-300"
+    },
+    "medals_badges": {
+      "style": "Glassmorphism over metallic gradients",
+      "classes": "relative overflow-hidden backdrop-blur-xl bg-black/40 border border-white/10 rounded-full"
+    },
+    "headers": {
+      "style": "Crystal Glass",
+      "classes": "backdrop-blur-2xl bg-[#0A0B0E]/80 border-b border-[#2A2D3A]"
+    }
+  },
+  "layout": {
+    "dashboard": "Control Room Grid (grid-cols-1 md:grid-cols-4 gap-4). Use bento-box styling for quick stats.",
+    "bracket": "Horizontal scroll view with connector lines using SVG. Items must have 1px solid borders.",
+    "spacing_scale": "Use generous padding inside cards (p-6) to avoid text collision.",
+    "alignment": "Left-align dense stats. Center-align empty states and major trophies."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#D4AF37] text-black font-bold uppercase tracking-widest rounded-lg px-6 py-3 hover:bg-[#F5D76E] transition-colors",
+      "secondary": "bg-transparent border border-[#2A2D3A] text-white rounded-lg px-6 py-3 hover:border-white/50"
+    },
+    "avatars": {
+      "style": "Hexagonal or sharp-rounded squares (rounded-xl) with metallic borders indicating player rank."
+    },
+    "data_tables": {
+      "style": "Cardless, full-width. Alternating row colors (bg-transparent and bg-white/5). 1px border-b on rows."
+    }
+  },
+  "media": {
+    "image_urls": {
+      "hero_background": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/8fa06adb-5c98-45bb-9499-f50f95927ec3/images/45a1275261d99d9d400f5af9e591b83553198518ba638b0780c64547f0528f3c.png",
+        "description": "Dark moody soccer stadium at night with subtle gold spotlights. Use as hero background overlay for the dashboard or edition landing page with opacity 20%.",
+        "category": "backgrounds"
+      },
+      "gold_medal_badge": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/8fa06adb-5c98-45bb-9499-f50f95927ec3/images/4c2c36e7eea8e7a54ff86937483362f269b5615c475b069065a73e60e0665575.png",
+        "description": "Elegant 3D gold medal badge on dark background. Use for 'Campeón del FIFA' or 'Rey de Copas' achievements.",
+        "category": "icons_badges"
+      },
+      "avatar_placeholders": [
+        "https://images.unsplash.com/photo-1766601269332-6f012c9e80f9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxlc3BvcnRzJTIwdG91cm5hbWVudCUyMGRhcmt8ZW58MHx8fHwxNzc2NDQ5ODY5fDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1771014846919-3a1cf73aeea1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwyfHxlc3BvcnRzJTIwdG91cm5hbWVudCUyMGRhcmt8ZW58MHx8fHwxNzc2NDQ5ODY5fDA&ixlib=rb-4.1.0&q=85"
+      ]
+    }
+  },
+  "interactions": {
+    "hover_states": "All cards must lift (-translate-y-1) with a subtle metallic glow shadow.",
+    "animations": "Use Framer Motion/Reanimated for entering screens. Stagger list items in rankings (delay 0.05s per item).",
+    "feedback": "Use Haptic feedback for goals registered or match submitted."
+  },
+  "testing": {
+    "attributes": "All interactive elements MUST include data-testid. E.g., data-testid='submit-match-button', data-testid='player-card-franco'"
+  },
+  "instructions_to_main_agent": [
+    "This is a React Native Expo app. The Tailwind classes provided in these guidelines must be mapped to NativeWind or React Native StyleSheet logic where applicable.",
+    "Maintain the Jewel & Luxury archetype. Avoid muddy grays; use the tinted #0A0B0E base.",
+    "Ensure 'Unbounded' font is loaded or explicitly mapped in the RN project.",
+    "Do NOT use pure #000000 or #FFFFFF. Use the specified off-black and off-white.",
+    "For the Tournament Brackets (Cups), build a custom visual tree (horizontal ScrollView) with clear connector lines.",
+    "Use the provided image URLs exclusively for testing/placeholders."
+  ]
+}
