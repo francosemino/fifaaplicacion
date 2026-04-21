@@ -1,5 +1,5 @@
 /** Centralized API client. Uses EXPO_PUBLIC_BACKEND_URL and always prefixes /api. */
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BASE = 'https://fifa-tracker-backend.onrender.com';
 
 async function request(path: string, options: RequestInit = {}) {
   const url = `${BASE}/api${path}`;
