@@ -1198,6 +1198,8 @@ async def seed_demo(reset: bool = True):
 # Register router
 app.include_router(api_router)
 
+app = FastAPI(title="FC Tournaments API")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1205,6 +1207,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
