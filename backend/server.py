@@ -20,6 +20,15 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI(title="FC Tournaments API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api_router = APIRouter(prefix="/api")
 
 
@@ -79,8 +88,8 @@ class Championship(BaseModel):
     name: str
     date: str = Field(default_factory=now_iso)
     participants: List[ChampionshipParticipant]
-    rounds: int = 2  # veces que se enfrentan todos contra todos
-    status: str = "ongoing"  # ongoing | finished
+    rounds: int = 2
+    status: str = "ongoing"
     champion_id: Optional[str] = None
     runnerup_id: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
@@ -96,8 +105,8 @@ class ChampionshipCreate(BaseModel):
 class Match(BaseModel):
     id: str = Field(default_factory=new_id)
     competition_id: str
-    competition_type: str  # championship | cup
-    round_name: Optional[str] = None  # e.g. "Fecha 1", "Semifinal", "Final"
+    competition_type: str
+    round_name: Optional[str] = None
     player1_id: str
     player2_id: str
     team1: Optional[str] = None
@@ -108,7 +117,7 @@ class Match(BaseModel):
     penalties: bool = False
     pen_goals1: Optional[int] = None
     pen_goals2: Optional[int] = None
-    winner_id: Optional[str] = None  # útil para copas con penales
+    winner_id: Optional[str] = None
     date: str = Field(default_factory=now_iso)
     notes: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
@@ -137,8 +146,8 @@ class Cup(BaseModel):
     edition_id: str
     name: str
     date: str = Field(default_factory=now_iso)
-    participants: List[str]  # player_ids, en orden de sembrado
-    format: str = "SF"  # QF (8), SF (4), F (2)
+    participants: List[str]
+    format: str = "SF"
     bracket: Dict[str, Any] = Field(default_factory=dict)
     status: str = "ongoing"
     champion_id: Optional[str] = None
@@ -164,7 +173,6 @@ async def _get_player_map() -> Dict[str, dict]:
 
 
 async def _compute_standings(championship: dict) -> List[dict]:
-    """Calcula tabla de posiciones de un campeonato."""
     participants = championship["participants"]
     player_ids = [p["player_id"] for p in participants]
     team_map = {p["player_id"]: p.get("team_name") for p in participants}
@@ -223,7 +231,6 @@ async def _compute_standings(championship: dict) -> List[dict]:
 
 
 def _match_result_for(player_id: str, m: dict) -> str:
-    """Returns 'W' | 'D' | 'L' from player perspective considering penales para copas."""
     if player_id == m["player1_id"]:
         mine, theirs = m["goals1"], m["goals2"]
         my_pen = m.get("pen_goals1")
@@ -247,14 +254,10 @@ def _match_result_for(player_id: str, m: dict) -> str:
 
 
 async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None) -> dict:
-    """Calcula todas las estadísticas de un jugador, opcionalmente filtradas por edición."""
-    # get matches involving player
     query = {"$or": [{"player1_id": player_id}, {"player2_id": player_id}]}
     all_matches = await db.matches.find(query, PROJECTION).to_list(5000)
 
-    # Filter by edition if provided
     if edition_id:
-        # Build set of competition ids in that edition
         champs = await db.championships.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
         cups = await db.cups.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
         valid_ids = {c["id"] for c in champs} | {c["id"] for c in cups}
@@ -264,7 +267,7 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
 
     played = won = drawn = lost = 0
     gf = ga = 0
-    biggest_win = None  # (diff, score, opponent_id)
+    biggest_win = None
     biggest_loss = None
     best_streak = 0
     worst_streak = 0
@@ -272,7 +275,6 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
 
     vs: Dict[str, dict] = defaultdict(lambda: {"played": 0, "won": 0, "drawn": 0, "lost": 0, "gf": 0, "ga": 0})
 
-    # ordenar por fecha
     matches_sorted = sorted(matches, key=lambda m: m.get("date", ""))
 
     for m in matches_sorted:
@@ -316,7 +318,6 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
             cur_w = 0
             cur_l = 0
 
-    # Championships & cups counts
     champs_q = {"champion_id": player_id}
     if edition_id:
         champs_q["edition_id"] = edition_id
@@ -342,15 +343,10 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
         cup_third_q["edition_id"] = edition_id
     cup_third_count = await db.cups.count_documents(cup_third_q)
 
-    # Puntos en campeonatos (3W+1D)
-    championship_points = won * 3 + drawn * 1  # aproximación solo para matches de campeonato
-    # Mejor: recalcular solo sobre matches de championship
     cp = 0
-    cm_count = 0
     for m in matches_sorted:
         if m["competition_type"] != "championship":
             continue
-        cm_count += 1
         res = _match_result_for(player_id, m)
         if res == "W":
             cp += 3
@@ -402,7 +398,6 @@ async def list_editions():
 
 @api_router.post("/editions", response_model=Edition)
 async def create_edition(body: EditionCreate):
-    # Validar unicidad por nombre
     existing = await db.editions.find_one({"name": body.name}, PROJECTION)
     if existing:
         return Edition(**existing)
@@ -425,7 +420,6 @@ async def edition_summary(edition_id: str):
     champs = await db.championships.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
     cups = await db.cups.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
 
-    # Ranking de la edición
     player_ids = set()
     for c in champs:
         for p in c["participants"]:
@@ -444,7 +438,6 @@ async def edition_summary(edition_id: str):
 
     best_player_id = None
     if ranking:
-        # "Campeón del FIFA" = jugador con más campeonatos ganados
         top = ranking[0]
         if top["championships"] > 0:
             best_player_id = top["player_id"]
@@ -511,21 +504,17 @@ async def player_profile(player_id: str):
         s = await _compute_player_stats(player_id, ed["id"])
         by_edition.append({"edition": ed, "stats": s})
 
-    # Championships & cups history
     champs_won = await db.championships.find({"champion_id": player_id}, PROJECTION).to_list(1000)
     champs_runner = await db.championships.find({"runnerup_id": player_id}, PROJECTION).to_list(1000)
     cups_won = await db.cups.find({"champion_id": player_id}, PROJECTION).to_list(1000)
     cups_runner = await db.cups.find({"runnerup_id": player_id}, PROJECTION).to_list(1000)
 
-    # Badges / medallas
     badges = []
-    # Campeón del FIFA por edición
     for ed in editions:
         summary = await edition_summary(ed["id"])
         if summary["best_player_id"] == player_id:
             badges.append({"type": "fifa_champion", "label": f"Campeón {ed['name']}", "tier": "gold", "edition_id": ed["id"]})
 
-    # "Rey de los campeonatos" - top 1 all-time en campeonatos
     all_players = await db.players.find({}, PROJECTION).to_list(1000)
     max_champ_count = 0
     top_champ_player = None
@@ -537,7 +526,6 @@ async def player_profile(player_id: str):
     if max_champ_count > 0 and top_champ_player == player_id:
         badges.append({"type": "king_of_championships", "label": "Rey de Campeonatos", "tier": "gold"})
 
-    # "Rey de las copas"
     max_cup_count = 0
     top_cup_player = None
     for p in all_players:
@@ -548,7 +536,6 @@ async def player_profile(player_id: str):
     if max_cup_count > 0 and top_cup_player == player_id:
         badges.append({"type": "king_of_cups", "label": "Rey de Copas", "tier": "gold"})
 
-    # "Goleador histórico"
     max_gf = 0
     top_gf = None
     for p in all_players:
@@ -559,7 +546,6 @@ async def player_profile(player_id: str):
     if max_gf > 0 and top_gf == player_id:
         badges.append({"type": "top_scorer", "label": "Goleador Histórico", "tier": "gold"})
 
-    # "Muro defensivo" - menor GA con min games
     min_ga_ratio = None
     top_def = None
     for p in all_players:
@@ -572,7 +558,6 @@ async def player_profile(player_id: str):
     if top_def == player_id:
         badges.append({"type": "iron_wall", "label": "Muro Defensivo", "tier": "silver"})
 
-    # "Pecho frío" - más finales perdidas
     max_finals_lost = 0
     top_pecho = None
     for p in all_players:
@@ -623,7 +608,6 @@ async def get_championship(cid: str):
         {"competition_id": cid, "competition_type": "championship"}, PROJECTION
     ).sort("date", 1).to_list(1000)
 
-    # Awards
     top_scorer = None
     best_def = None
     biggest = None
@@ -682,7 +666,6 @@ async def create_match(body: MatchCreate):
     data = body.dict()
     if data.get("date") is None:
         data["date"] = now_iso()
-    # Determine winner
     g1, g2 = data["goals1"], data["goals2"]
     if data.get("penalties") and data.get("pen_goals1") is not None and data.get("pen_goals2") is not None:
         if data["pen_goals1"] > data["pen_goals2"]:
@@ -718,10 +701,8 @@ async def list_matches(competition_id: Optional[str] = None):
 
 # ====================== ROUTES: CUPS ======================
 def _build_bracket(participants: List[str], fmt: str) -> Dict[str, Any]:
-    """Crea estructura de bracket según formato."""
     slots = {"QF": 8, "SF": 4, "F": 2}[fmt]
     participants = participants[:slots]
-    # pair 1vN, 2vN-1, ...
     pairs = []
     i, j = 0, len(participants) - 1
     while i < j:
@@ -742,7 +723,7 @@ def _build_bracket(participants: List[str], fmt: str) -> Dict[str, Any]:
             {"name": "Final", "matches": [{"p1": None, "p2": None, "w": None, "score": None}]},
             {"name": "Tercer Puesto", "matches": [{"p1": None, "p2": None, "w": None, "score": None}]},
         ]
-    else:  # F
+    else:
         rounds = [
             {"name": "Final", "matches": [{"p1": pairs[0][0] if pairs else None, "p2": pairs[0][1] if pairs else None, "w": None, "score": None}]}
         ]
@@ -798,7 +779,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
     if not c:
         raise HTTPException(404, "Cup not found")
 
-    # Save match
     mc = MatchCreate(
         competition_id=cid,
         competition_type="cup",
@@ -816,7 +796,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
     )
     await create_match(mc)
 
-    # Determine winner
     g1, g2 = body.goals1, body.goals2
     if body.penalties and body.pen_goals1 is not None and body.pen_goals2 is not None:
         winner = body.player1_id if body.pen_goals1 > body.pen_goals2 else body.player2_id
@@ -829,7 +808,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
         else:
             raise HTTPException(400, "En copas debe haber un ganador. Usá penales si quedó empatado.")
 
-    # Update bracket
     bracket = c["bracket"]
     score_str = f"{g1}-{g2}"
     if body.penalties and body.pen_goals1 is not None:
@@ -841,7 +819,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
     round_obj["matches"][body.match_index]["p1"] = body.player1_id
     round_obj["matches"][body.match_index]["p2"] = body.player2_id
 
-    # Advance winner to next round
     rounds = bracket["rounds"]
     cur_name = round_obj["name"]
 
@@ -855,7 +832,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
         nxt_idx = next_regular_round_idx(body.round_index)
         if nxt_idx is not None:
             next_round = rounds[nxt_idx]
-            # position: body.match_index // 2
             slot = body.match_index // 2
             if slot < len(next_round["matches"]):
                 m = next_round["matches"][slot]
@@ -864,7 +840,6 @@ async def register_cup_match(cid: str, body: CupMatchInput):
                 else:
                     m["p2"] = winner
 
-        # Also send losers of Semifinal to "Tercer Puesto"
         if cur_name == "Semifinal":
             tp_idx = None
             for k, rr in enumerate(rounds):
@@ -878,12 +853,10 @@ async def register_cup_match(cid: str, body: CupMatchInput):
                 else:
                     tp_match["p2"] = loser
 
-    # Update cup status/champion
     update_fields = {"bracket": bracket}
     if cur_name == "Final":
         update_fields["champion_id"] = winner
         update_fields["runnerup_id"] = loser
-        # status finished if tercer puesto not present or already played
         tp_played = any(
             rr["name"] == "Tercer Puesto" and rr["matches"][0].get("w")
             for rr in rounds
@@ -1003,7 +976,6 @@ async def history():
     all_cups = await db.cups.find({}, PROJECTION).sort("created_at", -1).to_list(1000)
     players = await db.players.find({}, PROJECTION).to_list(1000)
 
-    # Récords
     all_matches = await db.matches.find({}, PROJECTION).to_list(5000)
     record_goleada = None
     record_partido = None
@@ -1037,7 +1009,6 @@ async def seed_demo(reset: bool = True):
         await db.cups.delete_many({})
         await db.matches.delete_many({})
 
-    # Players
     players_data = [
         {"name": "Franco", "favorite_team": "Real Madrid"},
         {"name": "Tute", "favorite_team": "Boca Juniors"},
@@ -1052,7 +1023,6 @@ async def seed_demo(reset: bool = True):
 
     p_by_name = {p.name: p for p in players}
 
-    # Editions
     fc25 = Edition(name="FC 25", year=2024)
     fc26 = Edition(name="FC 26", year=2025)
     await db.editions.insert_one(fc25.dict())
@@ -1068,13 +1038,11 @@ async def seed_demo(reset: bool = True):
         c = Championship(edition_id=edition.id, name=name, participants=parts, rounds=rounds)
         await db.championships.insert_one(c.dict())
 
-        # Generate matches with bias for winner
         player_list = [p.id for p in players]
         for r in range(rounds):
             for i in range(len(player_list)):
                 for j in range(i + 1, len(player_list)):
                     p1, p2 = player_list[i], player_list[j]
-                    # bias toward winner
                     p1_name = next(p.name for p in players if p.id == p1)
                     p2_name = next(p.name for p in players if p.id == p2)
                     base1 = random.randint(0, 4)
@@ -1099,25 +1067,19 @@ async def seed_demo(reset: bool = True):
                         m.winner_id = p2
                     await db.matches.insert_one(m.dict())
 
-        # Finish
         standings = await _compute_standings(c.dict())
-        # Force winner if not matching (unlikely) - if winner_name differs, reorder
-        # Actually just trust the random bias result; take standings champion
         champion = standings[0]["player_id"]
         runnerup = standings[1]["player_id"]
         await db.championships.update_one({"id": c.id}, {"$set": {"status": "finished", "champion_id": champion, "runnerup_id": runnerup}})
 
-    # FC25: Tute 7, Tocruz 6, Franco 6, Rath 3 -> create mostly for Tute, etc.
     fc25_winners = ["Tute"] * 3 + ["Tocruz"] * 2 + ["Franco"] * 2 + ["Rath"] * 1
     for idx, w in enumerate(fc25_winners):
         await create_quick_championship(fc25, f"Liga FC25 #{idx+1}", w, rounds=1)
 
-    # FC26: Franco 3, Tute 2, Tocruz 2, Rath 1
     fc26_winners = ["Franco"] * 3 + ["Tute"] * 2 + ["Tocruz"] * 2 + ["Rath"] * 1
     for idx, w in enumerate(fc26_winners):
         await create_quick_championship(fc26, f"Liga FC26 #{idx+1}", w, rounds=1)
 
-    # Cups
     async def create_quick_cup(edition: Edition, name: str, champion_name: str, runnerup_name: str):
         pids = [p.id for p in players]
         random.shuffle(pids)
@@ -1129,7 +1091,6 @@ async def seed_demo(reset: bool = True):
         runner_id = p_by_name[runnerup_name].id
         others = [pid for pid in pids if pid not in (champ_id, runner_id)]
 
-        # Semifinals
         sf_matches = [(champ_id, others[0]), (runner_id, others[1])]
         for i, (a, b) in enumerate(sf_matches):
             g1, g2 = random.randint(2, 4), random.randint(0, 1)
@@ -1142,7 +1103,6 @@ async def seed_demo(reset: bool = True):
             await db.matches.insert_one(m.dict())
             c.bracket["rounds"][0]["matches"][i] = {"p1": a, "p2": b, "w": a, "l": b, "score": f"{g1}-{g2}"}
 
-        # Final
         fg1, fg2 = random.randint(1, 3), random.randint(0, 2)
         if fg1 <= fg2:
             fg1 = fg2 + 1
@@ -1155,7 +1115,6 @@ async def seed_demo(reset: bool = True):
         await db.matches.insert_one(fm.dict())
         c.bracket["rounds"][1]["matches"][0] = {"p1": champ_id, "p2": runner_id, "w": champ_id, "l": runner_id, "score": f"{fg1}-{fg2}"}
 
-        # Third place
         tg1, tg2 = random.randint(0, 3), random.randint(0, 3)
         if tg1 == tg2:
             tg1 += 1
@@ -1180,35 +1139,11 @@ async def seed_demo(reset: bool = True):
             }}
         )
 
-    # FC25 cups
-    await create_quick_cup(fc25, "Copa de Oro FC25", "Rath", "Tute")
-    await create_quick_cup(fc25, "Copa Invierno FC25", "Rath", "Tocruz")
-    await create_quick_cup(fc25, "Copa Verano FC25", "Tocruz", "Tute")
-    await create_quick_cup(fc25, "Copa Relámpago FC25", "Tute", "Tocruz")
-
-    # FC26 cups
-    await create_quick_cup(fc26, "Supercopa FC26", "Tocruz", "Rath")
-    await create_quick_cup(fc26, "Copa Oro FC26", "Tocruz", "Franco")
-    await create_quick_cup(fc26, "Copa Real FC26", "Tute", "Rath")
-    await create_quick_cup(fc26, "Copa Nocturna FC26", "Tute", "Rath")
-
     return {"ok": True, "message": "Demo data seeded"}
 
 
-# Register router
+# ====================== APP SETUP ======================
 app.include_router(api_router)
-
-app = FastAPI(title="FC Tournaments API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
