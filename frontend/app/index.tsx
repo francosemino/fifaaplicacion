@@ -76,7 +76,7 @@ export default function Dashboard() {
         {/* Hero */}
         <View style={styles.hero} testID="dashboard-hero">
           <Text style={styles.heroLabel}>FC TROPHY TRACKER</Text>
-          <Text style={styles.heroTitle}>Torneos entre amigos</Text>
+          <Text style={styles.heroTitle}>Torneos</Text>
           <Text style={styles.heroSubtitle}>
             Registrá, rankea y celebrá cada copa y liga.
           </Text>

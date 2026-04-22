@@ -28,34 +28,28 @@ export default function ChampionshipDetail() {
   const pBy = (pid: string) => players.find((p) => p.id === pid);
 
   const finish = async () => {
-    Alert.alert('Finalizar campeonato', '¿Se declarará campeón al primero de la tabla?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Finalizar',
-        onPress: async () => {
-          try {
-            await api.finishChampionship(id!);
-            await load();
-          } catch (e: any) {
-            Alert.alert('Error', e.message);
-          }
-        },
-      },
-    ]);
+  if (window.confirm('¿Se declarará campeón al primero de la tabla?')) {
+    try {
+      await api.finishChampionship(id!);
+      await load();
+    } catch (e: any) {
+      window.alert('Error: ' + e.message);
+    }
+  }
+};
+
+  const remove = async () => {
+    if (window.confirm('Esto borra también todos sus partidos. ¿Seguro?')) {
+      await api.deleteChampionship(id!);
+      router.back();
+    }
   };
 
-  const remove = () => {
-    Alert.alert('Eliminar campeonato', 'Esto borra también todos sus partidos.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await api.deleteChampionship(id!); router.back(); } },
-    ]);
-  };
-
-  const deleteMatch = (mid: string) => {
-    Alert.alert('Eliminar partido', '¿Seguro?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await api.deleteMatch(mid); await load(); } },
-    ]);
+  const deleteMatch = async (mid: string) => {
+    if (window.confirm('¿Seguro que querés eliminar este partido?')) {
+      await api.deleteMatch(mid);
+      await load();
+    }
   };
 
   if (loading || !data) {
@@ -248,9 +242,9 @@ function AddMatchModal({
 
   const pBy = (pid: string) => players.find((p: any) => p.id === pid);
 
-  const submit = async () => {
+ const submit = async () => {
     if (!p1 || !p2 || p1 === p2) {
-      Alert.alert('Elegí dos jugadores distintos');
+      window.alert('Elegí dos jugadores distintos');
       return;
     }
     try {
@@ -267,7 +261,7 @@ function AddMatchModal({
       });
       onDone();
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      window.alert('Error: ' + e.message);
     }
   };
 

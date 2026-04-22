@@ -33,7 +33,7 @@ export default function EditionsList() {
 
   const createEd = async () => {
     if (!name.trim()) {
-      Alert.alert('Nombre requerido');
+      window.alert('Nombre requerido');
       return;
     }
     await api.createEdition({ name: name.trim(), year: year ? parseInt(year) : null });
@@ -43,18 +43,11 @@ export default function EditionsList() {
     load();
   };
 
-  const delEd = (id: string, n: string) => {
-    Alert.alert('Eliminar edición', `¿Seguro querés eliminar ${n}?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          await api.deleteEdition(id);
-          load();
-        },
-      },
-    ]);
+  const delEd = async (id: string, n: string) => {
+    if (window.confirm(`¿Seguro querés eliminar ${n}?`)) {
+      await api.deleteEdition(id);
+      load();
+    }
   };
 
   return (
