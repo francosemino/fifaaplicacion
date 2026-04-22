@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../src/api';
+import { api, requireAdmin } from '../../src/api';
 import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Card, StatBox, Pill } from '../../src/ui';
 import Avatar from '../../src/Avatar';
@@ -24,18 +24,12 @@ export default function PlayerProfile() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const confirmDelete = () => {
-    Alert.alert('Eliminar jugador', '¿Estás seguro?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          await api.deletePlayer(id!);
-          router.back();
-        },
-      },
-    ]);
+ const confirmDelete = async () => {
+    if (!requireAdmin()) return;
+    if (window.confirm('¿Estás seguro que querés eliminar este jugador?')) {
+      await api.deletePlayer(id!);
+      router.back();
+    }
   };
 
   if (loading || !data) {
