@@ -108,6 +108,11 @@ export const api = {
       method: 'DELETE',
     }),
 
+  deleteGoalVideo: (id: string) =>
+    request(`/goals/${id}/video`, {
+      method: 'DELETE',
+    }),
+
   markTournamentBest: (id: string) =>
     request(`/goals/${id}/mark-tournament-best`, {
       method: 'POST',

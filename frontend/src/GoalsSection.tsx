@@ -70,6 +70,15 @@ export default function GoalsSection({
     ]);
   };
 
+  const deleteVideo = async (gid: string) => {
+    const ok = window.confirm('¿Seguro que querés eliminar el video de este gol? El gol va a seguir existiendo.');
+
+    if (!ok) return;
+
+    await api.deleteGoalVideo(gid);
+    await load();
+  };
+
   const openPlayer = async (g: any) => {
     // Fetch full goal with video
     const full = await api.getGoal(g.id);
@@ -168,11 +177,19 @@ export default function GoalsSection({
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    onPress={() => deleteGoal(g.id)}
-                    style={styles.iconBtn}
-                    testID={`delete-goal-${g.id}`}
+                onPress={() => deleteVideo(g.id)}
+                style={styles.iconBtn}
+                testID={`delete-goal-video-${g.id}`}
                 >
-                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                <Ionicons name="videocam-off-outline" size={14} color={colors.danger} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                onPress={() => deleteGoal(g.id)}
+                style={styles.iconBtn}
+                testID={`delete-goal-${g.id}`}
+                >
+                <Ionicons name="trash-outline" size={14} color={colors.danger} />
                 </TouchableOpacity>
                 </View>
             </View>

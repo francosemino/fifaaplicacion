@@ -414,31 +414,123 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
     }
     
     
+MAX_VIDEO_DATA_URI_CHARS = 12 * 1024 * 1024
+VALID_COMPETITION_TYPES = {"championship", "cup"}
+
+
 @api_router.get("/goals")
 async def list_goals(
     edition_id: Optional[str] = None,
     competition_id: Optional[str] = None,
+    competition_type: Optional[str] = None,
     player_id: Optional[str] = None,
+    is_puskas: Optional[bool] = None,
     include_video: bool = True,
 ):
     q: Dict[str, Any] = {}
+
     if edition_id:
         q["edition_id"] = edition_id
+
     if competition_id:
         q["competition_id"] = competition_id
+
+    if competition_type:
+        q["competition_type"] = competition_type
+
     if player_id:
         q["player_id"] = player_id
+
+    if is_puskas is not None:
+        q["is_puskas"] = is_puskas
+
     proj = dict(PROJECTION)
     if not include_video:
         proj["video_base64"] = 0
+
     items = await db.goals.find(q, proj).sort("created_at", -1).to_list(1000)
     return items
 
 
 @api_router.post("/goals", response_model=Goal)
 async def create_goal(body: GoalCreate):
-    g = Goal(**body.dict())
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(400, "El título del gol es obligatorio")
+
+    edition = await db.editions.find_one({"id": body.edition_id}, PROJECTION)
+    if not edition:
+        raise HTTPException(404, "Edición no encontrada")
+
+    player = await db.players.find_one({"id": body.player_id}, PROJECTION)
+    if not player:
+        raise HTTPException(404, "Jugador no encontrado")
+
+    if body.opponent_id:
+        opponent = await db.players.find_one({"id": body.opponent_id}, PROJECTION)
+        if not opponent:
+            raise HTTPException(404, "Rival no encontrado")
+
+    if body.competition_id:
+        if body.competition_type not in VALID_COMPETITION_TYPES:
+            raise HTTPException(400, "Tipo de competición inválido")
+
+        collection = db.championships if body.competition_type == "championship" else db.cups
+
+        competition = await collection.find_one(
+            {
+                "id": body.competition_id,
+                "edition_id": body.edition_id,
+            },
+            PROJECTION,
+        )
+
+        if not competition:
+            raise HTTPException(404, "Competición no encontrada")
+    else:
+        if body.competition_type:
+            raise HTTPException(400, "competition_type no puede venir sin competition_id")
+
+    if body.video_base64:
+        if not body.video_base64.startswith("data:video/"):
+            raise HTTPException(400, "El video debe venir como data URI de video")
+
+        if ";base64," not in body.video_base64:
+            raise HTTPException(400, "El video debe venir en formato base64")
+
+        if len(body.video_base64) > MAX_VIDEO_DATA_URI_CHARS:
+            raise HTTPException(
+                400,
+                "El video es muy grande. Probá con un clip más corto o comprimido.",
+            )
+
+    payload = body.dict()
+    payload["title"] = title
+    payload["description"] = body.description.strip() if body.description else None
+
+    if body.video_base64 and not payload.get("video_mime"):
+        payload["video_mime"] = body.video_base64.split(";")[0].replace("data:", "")
+
+    g = Goal(**payload)
     await db.goals.insert_one(g.dict())
+    return g
+
+
+@api_router.get("/goals/puskas/current")
+async def get_current_puskas(
+    edition_id: Optional[str] = None,
+    include_video: bool = True,
+):
+    q: Dict[str, Any] = {"is_puskas": True}
+
+    if edition_id:
+        q["edition_id"] = edition_id
+
+    proj = dict(PROJECTION)
+    if not include_video:
+        proj["video_base64"] = 0
+
+    g = await db.goals.find_one(q, proj)
     return g
 
 
@@ -452,43 +544,95 @@ async def get_goal(gid: str):
 
 @api_router.delete("/goals/{gid}")
 async def delete_goal(gid: str):
-    await db.goals.delete_one({"id": gid})
+    result = await db.goals.delete_one({"id": gid})
+
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Goal not found")
+
     return {"ok": True}
 
 
 @api_router.post("/goals/{gid}/mark-tournament-best")
 async def mark_tournament_best(gid: str):
     g = await db.goals.find_one({"id": gid}, PROJECTION)
+
     if not g:
         raise HTTPException(404, "Goal not found")
+
     if not g.get("competition_id"):
         raise HTTPException(400, "Goal has no competition")
-    # Unset other tournament_best in same competition, then toggle this one
+
     new_value = not g.get("is_tournament_best", False)
+
+    scope = {
+        "edition_id": g["edition_id"],
+        "competition_id": g["competition_id"],
+        "competition_type": g.get("competition_type"),
+    }
+
     await db.goals.update_many(
-        {"competition_id": g["competition_id"]},
+        scope,
         {"$set": {"is_tournament_best": False}},
     )
+
     if new_value:
-        await db.goals.update_one({"id": gid}, {"$set": {"is_tournament_best": True}})
-    return {"ok": True, "is_tournament_best": new_value}
+        await db.goals.update_one(
+            {"id": gid},
+            {"$set": {"is_tournament_best": True}},
+        )
+
+    return {
+        "ok": True,
+        "goal_id": gid,
+        "is_tournament_best": new_value,
+    }
 
 
 @api_router.post("/goals/{gid}/mark-puskas")
 async def mark_puskas(gid: str):
     g = await db.goals.find_one({"id": gid}, PROJECTION)
+
     if not g:
         raise HTTPException(404, "Goal not found")
+
     new_value = not g.get("is_puskas", False)
+
     await db.goals.update_many(
         {"edition_id": g["edition_id"]},
         {"$set": {"is_puskas": False}},
     )
-    if new_value:
-        await db.goals.update_one({"id": gid}, {"$set": {"is_puskas": True}})
-    return {"ok": True, "is_puskas": new_value}
 
-    
+    if new_value:
+        await db.goals.update_one(
+            {"id": gid},
+            {"$set": {"is_puskas": True}},
+        )
+
+    return {
+        "ok": True,
+        "goal_id": gid,
+        "is_puskas": new_value,
+    }
+
+@api_router.delete("/goals/{gid}/video")
+async def delete_goal_video(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+
+    if not g:
+        raise HTTPException(404, "Goal not found")
+
+    await db.goals.update_one(
+        {"id": gid},
+        {
+            "$set": {
+                "video_base64": None,
+                "video_mime": None,
+            }
+        },
+    )
+
+    updated = await db.goals.find_one({"id": gid}, PROJECTION)
+    return updated
     
 
 
