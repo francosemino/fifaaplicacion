@@ -8,7 +8,6 @@ import {
   TextInput,
   ScrollView,
   Alert,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -17,7 +16,7 @@ import { colors, fonts, radius, spacing } from './theme';
 import Avatar from './Avatar';
 import { Btn } from './ui';
 
-const MAX_VIDEO_BYTES = 12 * 1024 * 1024; // 12MB cap on base64 payload (~9MB raw)
+const MAX_VIDEO_BYTES = 8 * 1024 * 1024;
 
 type Props = {
   editionId: string;
@@ -39,9 +38,14 @@ export default function GoalsSection({
   const [playGoal, setPlayGoal] = useState<any | null>(null);
 
   const load = useCallback(async () => {
-    const list = await api.listGoals({ competition_id: competitionId, include_video: false });
+    const list = await api.listGoals({
+        competition_id: competitionId,
+        competition_type: competitionType,
+        include_video: false,
+    });
+
     setGoals(list);
-  }, [competitionId]);
+  }, [competitionId, competitionType]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -51,6 +55,11 @@ export default function GoalsSection({
 
   const toggleBest = async (gid: string) => {
     await api.markTournamentBest(gid);
+    load();
+  };
+
+  const togglePuskas = async (gid: string) => {
+    await api.markPuskas(gid);
     load();
   };
 
@@ -121,18 +130,51 @@ export default function GoalsSection({
               </View>
               <View style={{ gap: 6 }}>
                 {allowMarkBest ? (
-                  <TouchableOpacity
+                    <TouchableOpacity
                     onPress={() => toggleBest(g.id)}
-                    style={[styles.iconBtn, g.is_tournament_best && { backgroundColor: colors.gold, borderColor: colors.gold }]}
+                    style={[
+                        styles.iconBtn,
+                        g.is_tournament_best && {
+                        backgroundColor: colors.gold,
+                        borderColor: colors.gold,
+                        },
+                    ]}
                     testID={`mark-best-${g.id}`}
-                  >
-                    <Ionicons name="trophy" size={14} color={g.is_tournament_best ? '#0A0B0E' : colors.gold} />
-                  </TouchableOpacity>
+                    >
+                    <Ionicons
+                        name="trophy"
+                        size={14}
+                        color={g.is_tournament_best ? '#0A0B0E' : colors.gold}
+                    />
+                    </TouchableOpacity>
                 ) : null}
-                <TouchableOpacity onPress={() => deleteGoal(g.id)} style={styles.iconBtn} testID={`delete-goal-${g.id}`}>
-                  <Ionicons name="trash-outline" size={14} color={colors.danger} />
+
+                <TouchableOpacity
+                    onPress={() => togglePuskas(g.id)}
+                    style={[
+                    styles.iconBtn,
+                    g.is_puskas && {
+                        backgroundColor: colors.gold,
+                        borderColor: colors.gold,
+                    },
+                    ]}
+                    testID={`mark-puskas-${g.id}`}
+                >
+                    <Ionicons
+                    name="star"
+                    size={14}
+                    color={g.is_puskas ? '#0A0B0E' : colors.gold}
+                    />
                 </TouchableOpacity>
-              </View>
+
+                <TouchableOpacity
+                    onPress={() => deleteGoal(g.id)}
+                    style={styles.iconBtn}
+                    testID={`delete-goal-${g.id}`}
+                >
+                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                </TouchableOpacity>
+                </View>
             </View>
           );
         })
@@ -170,23 +212,31 @@ function AddGoalModal({
   }, [visible]);
 
   const pickVideo = async () => {
-    const input = document.createElement('input');
+    const doc = (globalThis as any).document;
+    const FileReaderCtor = (globalThis as any).FileReader;
+
+    if (!doc || !FileReaderCtor) {
+        Alert.alert('No disponible', 'La carga de video está disponible solo en web.');
+        return;
+    }
+
+    const input = doc.createElement('input');
     input.type = 'file';
     input.accept = 'video/*';
 
-    input.onchange = async () => {
-        const file = input.files?.[0];
+    input.onchange = () => {
+        const file = input.files && input.files[0];
         if (!file) return;
 
         if (file.size > MAX_VIDEO_BYTES) {
         Alert.alert(
             'Video muy grande',
-            `El video pesa ~${Math.round(file.size / 1024 / 1024)} MB. El máximo es 12 MB. Probá con un clip más corto.`
+            `El video pesa ~${Math.round(file.size / 1024 / 1024)} MB. El máximo es 8 MB. Probá con un clip más corto.`
         );
         return;
         }
 
-        const reader = new FileReader();
+        const reader = new FileReaderCtor();
 
         reader.onload = () => {
         const result = String(reader.result || '');
@@ -214,17 +264,17 @@ function AddGoalModal({
     if (!playerId) return Alert.alert('Elegí quién hizo el gol');
     setSaving(true);
     try {
-      await api.createGoal({
+        await api.createGoal({
         edition_id: editionId,
         competition_id: competitionId,
         competition_type: competitionType,
         player_id: playerId,
         opponent_id: opponentId,
         title: title.trim(),
-        description: description.trim() || null,
+        description: description.trim(),
         video_base64: video ? `data:${video.mime};base64,${video.base64}` : null,
         video_mime: video?.mime || null,
-      });
+    });
       onDone();
     } catch (e: any) {
       Alert.alert('Error al guardar', e.message);

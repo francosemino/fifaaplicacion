@@ -1,5 +1,5 @@
 /** Centralized API client. Uses EXPO_PUBLIC_BACKEND_URL and always prefixes /api. */
-const BASE = 'https://fifa-tracker-backend.onrender.com';
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://fifa-tracker-backend.onrender.com';
 
 const ADMIN_PASSWORD = '4811';
 
@@ -65,20 +65,68 @@ export const api = {
   rankings: (editionId?: string) =>
     request(`/rankings${editionId ? `?edition_id=${editionId}` : ''}`),
   head2head: (p1: string, p2: string) => request(`/head2head/${p1}/${p2}`),
-  // Goals
-  listGoals: (params: { edition_id?: string; competition_id?: string; player_id?: string; include_video?: boolean } = {}) => {
+   // Goals
+  listGoals: (
+    params: {
+      edition_id?: string;
+      competition_id?: string;
+      competition_type?: 'championship' | 'cup';
+      player_id?: string;
+      is_puskas?: boolean;
+      include_video?: boolean;
+    } = {}
+  ) => {
     const qs = new URLSearchParams();
+
     if (params.edition_id) qs.append('edition_id', params.edition_id);
     if (params.competition_id) qs.append('competition_id', params.competition_id);
+    if (params.competition_type) qs.append('competition_type', params.competition_type);
     if (params.player_id) qs.append('player_id', params.player_id);
-    if (params.include_video === false) qs.append('include_video', 'false');
+
+    if (typeof params.is_puskas === 'boolean') {
+      qs.append('is_puskas', String(params.is_puskas));
+    }
+
+    if (typeof params.include_video === 'boolean') {
+      qs.append('include_video', String(params.include_video));
+    }
+
     const s = qs.toString();
     return request(`/goals${s ? `?${s}` : ''}`);
   },
+
   getGoal: (id: string) => request(`/goals/${id}`),
-  createGoal: (body: any) => request('/goals', { method: 'POST', body: JSON.stringify(body) }),
-  deleteGoal: (id: string) => request(`/goals/${id}`, { method: 'DELETE' }),
-  markTournamentBest: (id: string) => request(`/goals/${id}/mark-tournament-best`, { method: 'POST' }),
-  markPuskas: (id: string) => request(`/goals/${id}/mark-puskas`, { method: 'POST' }),
+
+  createGoal: (body: any) =>
+    request('/goals', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteGoal: (id: string) =>
+    request(`/goals/${id}`, {
+      method: 'DELETE',
+    }),
+
+  markTournamentBest: (id: string) =>
+    request(`/goals/${id}/mark-tournament-best`, {
+      method: 'POST',
+    }),
+
+  markPuskas: (id: string) =>
+    request(`/goals/${id}/mark-puskas`, {
+      method: 'POST',
+    }),
+
+  getCurrentPuskas: (editionId?: string, includeVideo: boolean = true) => {
+    const qs = new URLSearchParams();
+
+    if (editionId) qs.append('edition_id', editionId);
+    qs.append('include_video', String(includeVideo));
+
+    const s = qs.toString();
+    return request(`/goals/puskas/current${s ? `?${s}` : ''}`);
+  },
+
   seed: () => request('/seed', { method: 'POST' }),
 };
