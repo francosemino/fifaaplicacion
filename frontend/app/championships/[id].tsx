@@ -7,6 +7,7 @@ import { api, requireAdmin } from '../../src/api';
 import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Btn, Card } from '../../src/ui';
 import Avatar from '../../src/Avatar';
+import GoalsSection from '../../src/GoalsSection';
 
 export default function ChampionshipDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -199,6 +200,18 @@ export default function ChampionshipDetail() {
         {c.status !== 'finished' && matches.length > 0 ? (
           <Btn label="Finalizar campeonato" icon="flag" onPress={finish} testID="finish-champ-button" variant="primary" />
         ) : null}
+
+         {/* Goals section */}
+        <View style={{ height: 8 }} />
+        <GoalsSection
+          editionId={c.edition_id}
+          competitionId={c.id}
+          competitionType="championship"
+          participants={c.participants.map((x: any) => {
+            const p = pBy(x.player_id);
+            return { id: x.player_id, name: p?.name || '?', avatar_base64: p?.avatar_base64 };
+          })}
+        />
       </ScrollView>
 
       <AddMatchModal

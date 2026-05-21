@@ -77,6 +77,36 @@ class PlayerUpdate(BaseModel):
     favorite_team: Optional[str] = None
 
 
+class Goal(BaseModel):
+    id: str = Field(default_factory=new_id)
+    edition_id: str
+    competition_id: Optional[str] = None
+    competition_type: Optional[str] = None  # championship | cup
+    player_id: str
+    opponent_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    video_base64: Optional[str] = None  # data URI (data:video/mp4;base64,...)
+    video_mime: Optional[str] = None
+    thumbnail_base64: Optional[str] = None
+    is_tournament_best: bool = False
+    is_puskas: bool = False
+    created_at: str = Field(default_factory=now_iso)
+
+
+class GoalCreate(BaseModel):
+    edition_id: str
+    competition_id: Optional[str] = None
+    competition_type: Optional[str] = None
+    player_id: str
+    opponent_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    video_base64: Optional[str] = None
+    video_mime: Optional[str] = None
+    thumbnail_base64: Optional[str] = None
+
+
 class ChampionshipParticipant(BaseModel):
     player_id: str
     team_name: Optional[str] = None
@@ -382,6 +412,84 @@ async def _compute_player_stats(player_id: str, edition_id: Optional[str] = None
         "biggest_loss": biggest_loss,
         "vs_rivals": dict(vs),
     }
+    
+    
+@api_router.get("/goals")
+async def list_goals(
+    edition_id: Optional[str] = None,
+    competition_id: Optional[str] = None,
+    player_id: Optional[str] = None,
+    include_video: bool = True,
+):
+    q: Dict[str, Any] = {}
+    if edition_id:
+        q["edition_id"] = edition_id
+    if competition_id:
+        q["competition_id"] = competition_id
+    if player_id:
+        q["player_id"] = player_id
+    proj = dict(PROJECTION)
+    if not include_video:
+        proj["video_base64"] = 0
+    items = await db.goals.find(q, proj).sort("created_at", -1).to_list(1000)
+    return items
+
+
+@api_router.post("/goals", response_model=Goal)
+async def create_goal(body: GoalCreate):
+    g = Goal(**body.dict())
+    await db.goals.insert_one(g.dict())
+    return g
+
+
+@api_router.get("/goals/{gid}")
+async def get_goal(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+    if not g:
+        raise HTTPException(404, "Goal not found")
+    return g
+
+
+@api_router.delete("/goals/{gid}")
+async def delete_goal(gid: str):
+    await db.goals.delete_one({"id": gid})
+    return {"ok": True}
+
+
+@api_router.post("/goals/{gid}/mark-tournament-best")
+async def mark_tournament_best(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+    if not g:
+        raise HTTPException(404, "Goal not found")
+    if not g.get("competition_id"):
+        raise HTTPException(400, "Goal has no competition")
+    # Unset other tournament_best in same competition, then toggle this one
+    new_value = not g.get("is_tournament_best", False)
+    await db.goals.update_many(
+        {"competition_id": g["competition_id"]},
+        {"$set": {"is_tournament_best": False}},
+    )
+    if new_value:
+        await db.goals.update_one({"id": gid}, {"$set": {"is_tournament_best": True}})
+    return {"ok": True, "is_tournament_best": new_value}
+
+
+@api_router.post("/goals/{gid}/mark-puskas")
+async def mark_puskas(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+    if not g:
+        raise HTTPException(404, "Goal not found")
+    new_value = not g.get("is_puskas", False)
+    await db.goals.update_many(
+        {"edition_id": g["edition_id"]},
+        {"$set": {"is_puskas": False}},
+    )
+    if new_value:
+        await db.goals.update_one({"id": gid}, {"$set": {"is_puskas": True}})
+    return {"ok": True, "is_puskas": new_value}
+
+    
+    
 
 
 # ====================== ROUTES: EDITIONS ======================

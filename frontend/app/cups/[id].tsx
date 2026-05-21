@@ -7,6 +7,7 @@ import { api, requireAdmin } from '../../src/api';
 import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Btn, Card } from '../../src/ui';
 import Avatar from '../../src/Avatar';
+import GoalsSection from '../../src/GoalsSection';
 
 export default function CupDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -131,6 +132,18 @@ export default function CupDetail() {
             </View>
           ))}
         </ScrollView>
+        
+        {/* Goals section */}
+        <View style={{ height: 8 }} />
+        <GoalsSection
+          editionId={cup.edition_id}
+          competitionId={cup.id}
+          competitionType="cup"
+          participants={(cup.participants || []).map((pid: string) => {
+            const p = pBy(pid);
+            return { id: pid, name: p?.name || '?', avatar_base64: p?.avatar_base64 };
+          })}
+        />
       </ScrollView>
 
       {modal ? (

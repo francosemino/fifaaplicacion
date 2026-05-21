@@ -23,7 +23,7 @@ for i, champ_id in enumerate(campeonatos):
     db.championships.insert_one({
         "id": nid(),
         "edition_id": EDITION_ID,
-        "name": f"Liga FC25 #{i+1}",
+        "name": f"Liga FC26 #{i+1}",
         "date": now(),
         "participants": [
             {"player_id": FRANCO, "team_name": None},

@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../src/api';
+import { api, requireAdmin } from '../../src/api';
 import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Btn } from '../../src/ui';
 import BottomNav from '../../src/BottomNav';
@@ -44,6 +44,7 @@ export default function EditionsList() {
   };
 
   const delEd = async (id: string, n: string) => {
+    if (!requireAdmin()) return;
     if (window.confirm(`¿Seguro querés eliminar ${n}?`)) {
       await api.deleteEdition(id);
       load();

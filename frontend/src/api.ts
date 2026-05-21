@@ -1,6 +1,17 @@
 /** Centralized API client. Uses EXPO_PUBLIC_BACKEND_URL and always prefixes /api. */
 const BASE = 'https://fifa-tracker-backend.onrender.com';
 
+const ADMIN_PASSWORD = '4811';
+
+export function requireAdmin(): boolean {
+  const pwd = window.prompt('Ingresá la contraseña de administrador:');
+  if (pwd !== ADMIN_PASSWORD) {
+    if (pwd !== null) window.alert('Contraseña incorrecta');
+    return false;
+  }
+  return true;
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const url = `${BASE}/api${path}`;
   const res = await fetch(url, {
@@ -54,5 +65,20 @@ export const api = {
   rankings: (editionId?: string) =>
     request(`/rankings${editionId ? `?edition_id=${editionId}` : ''}`),
   head2head: (p1: string, p2: string) => request(`/head2head/${p1}/${p2}`),
+  // Goals
+  listGoals: (params: { edition_id?: string; competition_id?: string; player_id?: string; include_video?: boolean } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.edition_id) qs.append('edition_id', params.edition_id);
+    if (params.competition_id) qs.append('competition_id', params.competition_id);
+    if (params.player_id) qs.append('player_id', params.player_id);
+    if (params.include_video === false) qs.append('include_video', 'false');
+    const s = qs.toString();
+    return request(`/goals${s ? `?${s}` : ''}`);
+  },
+  getGoal: (id: string) => request(`/goals/${id}`),
+  createGoal: (body: any) => request('/goals', { method: 'POST', body: JSON.stringify(body) }),
+  deleteGoal: (id: string) => request(`/goals/${id}`, { method: 'DELETE' }),
+  markTournamentBest: (id: string) => request(`/goals/${id}/mark-tournament-best`, { method: 'POST' }),
+  markPuskas: (id: string) => request(`/goals/${id}/mark-puskas`, { method: 'POST' }),
   seed: () => request('/seed', { method: 'POST' }),
 };
