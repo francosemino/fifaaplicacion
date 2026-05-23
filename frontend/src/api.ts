@@ -1,77 +1,192 @@
 /** Centralized API client. Uses EXPO_PUBLIC_BACKEND_URL and always prefixes /api. */
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://fifa-tracker-backend.onrender.com';
+
+const BASE =
+  process.env.EXPO_PUBLIC_BACKEND_URL ||
+  'https://fifa-tracker-backend.onrender.com';
 
 const ADMIN_PASSWORD = '4811';
 
+const CACHE_TTL_MS = 60_000;
+
+type ApiOptions = RequestInit & {
+  skipCache?: boolean;
+};
+
+const cache = new Map<string, { time: number; data: any }>();
+const inflight = new Map<string, Promise<any>>();
+
+function clearApiCache() {
+  cache.clear();
+  inflight.clear();
+}
+
 export function requireAdmin(): boolean {
   const pwd = window.prompt('Ingresá la contraseña de administrador:');
+
   if (pwd !== ADMIN_PASSWORD) {
     if (pwd !== null) window.alert('Contraseña incorrecta');
     return false;
   }
+
   return true;
 }
 
-async function request(path: string, options: RequestInit = {}) {
+async function request(path: string, options: ApiOptions = {}) {
   const url = `${BASE}/api${path}`;
-  const res = await fetch(url, {
+  const method = (options.method || 'GET').toUpperCase();
+  const isGet = method === 'GET';
+
+  if (isGet && !options.skipCache) {
+    const hit = cache.get(url);
+
+    if (hit && Date.now() - hit.time < CACHE_TTL_MS) {
+      return hit.data;
+    }
+
+    const pending = inflight.get(url);
+
+    if (pending) {
+      return pending;
+    }
+  }
+
+  const promise = fetch(url, {
     ...options,
+    method,
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
-  });
-  if (!res.ok) {
+  }).then(async (res) => {
     const txt = await res.text();
-    throw new Error(`API ${res.status}: ${txt}`);
+
+    if (!res.ok) {
+      throw new Error(`API ${res.status}: ${txt}`);
+    }
+
+    const data = txt ? JSON.parse(txt) : null;
+
+    if (isGet && !options.skipCache) {
+      cache.set(url, {
+        time: Date.now(),
+        data,
+      });
+    } else if (!isGet) {
+      clearApiCache();
+    }
+
+    return data;
+  }).finally(() => {
+    if (isGet) {
+      inflight.delete(url);
+    }
+  });
+
+  if (isGet && !options.skipCache) {
+    inflight.set(url, promise);
   }
-  return res.json();
+
+  return promise;
 }
 
 export const api = {
   dashboard: () => request('/dashboard'),
   history: () => request('/history'),
+
   // Editions
   listEditions: () => request('/editions'),
-  createEdition: (body: any) => request('/editions', { method: 'POST', body: JSON.stringify(body) }),
+  createEdition: (body: any) =>
+    request('/editions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   editionSummary: (id: string) => request(`/editions/${id}/summary`),
-  deleteEdition: (id: string) => request(`/editions/${id}`, { method: 'DELETE' }),
+  deleteEdition: (id: string) =>
+    request(`/editions/${id}`, {
+      method: 'DELETE',
+    }),
+
   // Players
   listPlayers: () => request('/players'),
-  createPlayer: (body: any) => request('/players', { method: 'POST', body: JSON.stringify(body) }),
+  createPlayer: (body: any) =>
+    request('/players', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getPlayer: (id: string) => request(`/players/${id}`),
-  updatePlayer: (id: string, body: any) => request(`/players/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updatePlayer: (id: string, body: any) =>
+    request(`/players/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   playerProfile: (id: string) => request(`/players/${id}/profile`),
-  deletePlayer: (id: string) => request(`/players/${id}`, { method: 'DELETE' }),
+  deletePlayer: (id: string) =>
+    request(`/players/${id}`, {
+      method: 'DELETE',
+    }),
+
   // Championships
   listChampionships: (editionId?: string) =>
     request(`/championships${editionId ? `?edition_id=${editionId}` : ''}`),
-  createChampionship: (body: any) => request('/championships', { method: 'POST', body: JSON.stringify(body) }),
+  createChampionship: (body: any) =>
+    request('/championships', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getChampionship: (id: string) => request(`/championships/${id}`),
-  finishChampionship: (id: string) => request(`/championships/${id}/finish`, { method: 'POST' }),
-  deleteChampionship: (id: string) => request(`/championships/${id}`, { method: 'DELETE' }),
+  finishChampionship: (id: string) =>
+    request(`/championships/${id}/finish`, {
+      method: 'POST',
+    }),
+  deleteChampionship: (id: string) =>
+    request(`/championships/${id}`, {
+      method: 'DELETE',
+    }),
+
   // Matches
-  createMatch: (body: any) => request('/matches', { method: 'POST', body: JSON.stringify(body) }),
-  deleteMatch: (id: string) => request(`/matches/${id}`, { method: 'DELETE' }),
+  createMatch: (body: any) =>
+    request('/matches', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteMatch: (id: string) =>
+    request(`/matches/${id}`, {
+      method: 'DELETE',
+    }),
+
   // Cups
   listCups: (editionId?: string) =>
     request(`/cups${editionId ? `?edition_id=${editionId}` : ''}`),
-  createCup: (body: any) => request('/cups', { method: 'POST', body: JSON.stringify(body) }),
+  createCup: (body: any) =>
+    request('/cups', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getCup: (id: string) => request(`/cups/${id}`),
   registerCupMatch: (id: string, body: any) =>
-    request(`/cups/${id}/match`, { method: 'POST', body: JSON.stringify(body) }),
-  deleteCup: (id: string) => request(`/cups/${id}`, { method: 'DELETE' }),
+    request(`/cups/${id}/match`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteCup: (id: string) =>
+    request(`/cups/${id}`, {
+      method: 'DELETE',
+    }),
+
   // Rankings
   rankings: (editionId?: string) =>
     request(`/rankings${editionId ? `?edition_id=${editionId}` : ''}`),
-  head2head: (p1: string, p2: string) => request(`/head2head/${p1}/${p2}`),
-   // Goals
+  head2head: (p1: string, p2: string) =>
+    request(`/head2head/${p1}/${p2}`),
+
+  // Goals
   listGoals: (
     params: {
       edition_id?: string;
       competition_id?: string;
       competition_type?: 'championship' | 'cup';
       player_id?: string;
+      is_tournament_best?: boolean;
       is_puskas?: boolean;
       include_video?: boolean;
     } = {}
@@ -83,6 +198,10 @@ export const api = {
     if (params.competition_type) qs.append('competition_type', params.competition_type);
     if (params.player_id) qs.append('player_id', params.player_id);
 
+    if (typeof params.is_tournament_best === 'boolean') {
+      qs.append('is_tournament_best', String(params.is_tournament_best));
+    }
+
     if (typeof params.is_puskas === 'boolean') {
       qs.append('is_puskas', String(params.is_puskas));
     }
@@ -92,6 +211,7 @@ export const api = {
     }
 
     const s = qs.toString();
+
     return request(`/goals${s ? `?${s}` : ''}`);
   },
 
@@ -130,8 +250,12 @@ export const api = {
     qs.append('include_video', String(includeVideo));
 
     const s = qs.toString();
+
     return request(`/goals/puskas/current${s ? `?${s}` : ''}`);
   },
 
-  seed: () => request('/seed', { method: 'POST' }),
+  seed: () =>
+    request('/seed', {
+      method: 'POST',
+    }),
 };

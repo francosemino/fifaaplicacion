@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { api } from './api';
+import { api, requireAdmin } from './api';
 import { colors, fonts, radius, spacing } from './theme';
 import Avatar from './Avatar';
 import { Btn } from './ui';
@@ -38,14 +38,15 @@ export default function GoalsSection({
   const [playGoal, setPlayGoal] = useState<any | null>(null);
 
   const load = useCallback(async () => {
-    const list = await api.listGoals({
-        competition_id: competitionId,
-        competition_type: competitionType,
-        include_video: false,
-    });
+  const list = await api.listGoals({
+     edition_id: editionId,
+     competition_id: competitionId,
+     competition_type: competitionType,
+     include_video: false,
+   });
 
     setGoals(list);
-  }, [competitionId, competitionType]);
+    }, [editionId, competitionId, competitionType]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -54,30 +55,47 @@ export default function GoalsSection({
   const pBy = (pid: string) => participants.find((p) => p.id === pid);
 
   const toggleBest = async (gid: string) => {
-    await api.markTournamentBest(gid);
-    load();
-  };
+    if (!requireAdmin()) return;
 
-  const togglePuskas = async (gid: string) => {
-    await api.markPuskas(gid);
-    load();
-  };
+    try {
+        await api.markTournamentBest(gid);
+        await load();
+    } catch (e: any) {
+        window.alert('No se pudo marcar el mejor gol: ' + e.message);
+    }
+    };
 
-  const deleteGoal = (gid: string) => {
-    Alert.alert('Eliminar gol', '¿Seguro?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await api.deleteGoal(gid); load(); } },
-    ]);
-  };
+  const deleteGoal = async (gid: string) => {
+    if (!requireAdmin()) return;
 
-  const deleteVideo = async (gid: string) => {
-    const ok = window.confirm('¿Seguro que querés eliminar el video de este gol? El gol va a seguir existiendo.');
+  const ok = window.confirm('¿Seguro que querés eliminar este gol completo?');
 
     if (!ok) return;
 
-    await api.deleteGoalVideo(gid);
-    await load();
-  };
+    try {
+        await api.deleteGoal(gid);
+        await load();
+    } catch (e: any) {
+        window.alert('No se pudo eliminar el gol: ' + e.message);
+    }
+    };
+
+  const deleteVideo = async (gid: string) => {
+    if (!requireAdmin()) return;
+
+  const ok = window.confirm(
+        '¿Seguro que querés eliminar solo el video de este gol? El gol va a seguir existiendo.'
+    );
+
+    if (!ok) return;
+
+    try {
+        await api.deleteGoalVideo(gid);
+        await load();
+    } catch (e: any) {
+        window.alert('No se pudo eliminar el video: ' + e.message);
+    }
+    };
 
   const openPlayer = async (g: any) => {
     // Fetch full goal with video
@@ -89,8 +107,8 @@ export default function GoalsSection({
     <View style={{ gap: 10 }}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>🎬 Mejor gol del torneo</Text>
-          <Text style={styles.sub}>Subí videos de los mejores goles</Text>
+            <Text style={styles.title}>🎬 Goles candidatos del torneo</Text>
+            <Text style={styles.sub}>Subí goles y marcá uno como mejor gol del torneo</Text>
         </View>
         <TouchableOpacity
           onPress={() => setModalOpen(true)}
@@ -158,31 +176,15 @@ export default function GoalsSection({
                     </TouchableOpacity>
                 ) : null}
 
+                {g.has_video ? (
                 <TouchableOpacity
-                    onPress={() => togglePuskas(g.id)}
-                    style={[
-                    styles.iconBtn,
-                    g.is_puskas && {
-                        backgroundColor: colors.gold,
-                        borderColor: colors.gold,
-                    },
-                    ]}
-                    testID={`mark-puskas-${g.id}`}
+                    onPress={() => deleteVideo(g.id)}
+                    style={styles.iconBtn}
+                    testID={`delete-goal-video-${g.id}`}
                 >
-                    <Ionicons
-                    name="star"
-                    size={14}
-                    color={g.is_puskas ? '#0A0B0E' : colors.gold}
-                    />
+                    <Ionicons name="videocam-off-outline" size={14} color={colors.danger} />
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                onPress={() => deleteVideo(g.id)}
-                style={styles.iconBtn}
-                testID={`delete-goal-video-${g.id}`}
-                >
-                <Ionicons name="videocam-off-outline" size={14} color={colors.danger} />
-                </TouchableOpacity>
+                ) : null}
 
                 <TouchableOpacity
                 onPress={() => deleteGoal(g.id)}

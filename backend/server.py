@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -31,6 +32,30 @@ app.add_middleware(
 
 api_router = APIRouter(prefix="/api")
 
+
+@app.on_event("startup")
+async def ensure_indexes():
+    await db.editions.create_index([("created_at", 1)])
+    await db.players.create_index([("name", 1)])
+
+    await db.championships.create_index([("edition_id", 1), ("created_at", -1)])
+    await db.championships.create_index([("champion_id", 1)])
+    await db.championships.create_index([("runnerup_id", 1)])
+
+    await db.cups.create_index([("edition_id", 1), ("created_at", -1)])
+    await db.cups.create_index([("champion_id", 1)])
+    await db.cups.create_index([("runnerup_id", 1)])
+    await db.cups.create_index([("third_place_id", 1)])
+
+    await db.matches.create_index([("competition_id", 1), ("competition_type", 1), ("date", 1)])
+    await db.matches.create_index([("player1_id", 1)])
+    await db.matches.create_index([("player2_id", 1)])
+    await db.matches.create_index([("date", -1)])
+
+    await db.goals.create_index([("edition_id", 1), ("created_at", -1)])
+    await db.goals.create_index([("competition_id", 1), ("competition_type", 1), ("created_at", -1)])
+    await db.goals.create_index([("edition_id", 1), ("is_tournament_best", 1)])
+    await db.goals.create_index([("edition_id", 1), ("is_puskas", 1)])
 
 # ====================== MODELS ======================
 def now_iso() -> str:
@@ -424,6 +449,7 @@ async def list_goals(
     competition_id: Optional[str] = None,
     competition_type: Optional[str] = None,
     player_id: Optional[str] = None,
+    is_tournament_best: Optional[bool] = None,
     is_puskas: Optional[bool] = None,
     include_video: bool = True,
 ):
@@ -441,20 +467,42 @@ async def list_goals(
     if player_id:
         q["player_id"] = player_id
 
+    if is_tournament_best is not None:
+        q["is_tournament_best"] = is_tournament_best
+
     if is_puskas is not None:
         q["is_puskas"] = is_puskas
 
-    proj = dict(PROJECTION)
-    if not include_video:
-        proj["video_base64"] = 0
+    pipeline = [
+        {"$match": q},
+        {
+            "$addFields": {
+                "has_video": {
+                    "$and": [
+                        {"$ne": ["$video_base64", None]},
+                        {"$ne": ["$video_base64", ""]},
+                    ]
+                }
+            }
+        },
+        {"$sort": {"created_at": -1}},
+    ]
 
-    items = await db.goals.find(q, proj).sort("created_at", -1).to_list(1000)
+    project = {"_id": 0}
+
+    if not include_video:
+        project["video_base64"] = 0
+
+    pipeline.append({"$project": project})
+
+    items = await db.goals.aggregate(pipeline).to_list(1000)
     return items
 
 
 @api_router.post("/goals", response_model=Goal)
 async def create_goal(body: GoalCreate):
     title = body.title.strip()
+
     if not title:
         raise HTTPException(400, "El título del gol es obligatorio")
 
@@ -512,7 +560,9 @@ async def create_goal(body: GoalCreate):
         payload["video_mime"] = body.video_base64.split(";")[0].replace("data:", "")
 
     g = Goal(**payload)
+
     await db.goals.insert_one(g.dict())
+
     return g
 
 
@@ -527,18 +577,24 @@ async def get_current_puskas(
         q["edition_id"] = edition_id
 
     proj = dict(PROJECTION)
+
     if not include_video:
         proj["video_base64"] = 0
 
     g = await db.goals.find_one(q, proj)
+
     return g
 
 
 @api_router.get("/goals/{gid}")
 async def get_goal(gid: str):
     g = await db.goals.find_one({"id": gid}, PROJECTION)
+
     if not g:
         raise HTTPException(404, "Goal not found")
+
+    g["has_video"] = bool(g.get("video_base64"))
+
     return g
 
 
@@ -550,6 +606,109 @@ async def delete_goal(gid: str):
         raise HTTPException(404, "Goal not found")
 
     return {"ok": True}
+
+
+@api_router.delete("/goals/{gid}/video")
+async def delete_goal_video(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+
+    if not g:
+        raise HTTPException(404, "Goal not found")
+
+    await db.goals.update_one(
+        {"id": gid},
+        {
+            "$set": {
+                "video_base64": None,
+                "video_mime": None,
+                "thumbnail_base64": None,
+            }
+        },
+    )
+
+    updated = await db.goals.find_one({"id": gid}, PROJECTION)
+    updated["has_video"] = False
+
+    return updated
+
+
+@api_router.post("/goals/{gid}/mark-tournament-best")
+async def mark_tournament_best(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+
+    if not g:
+        raise HTTPException(404, "Goal not found")
+
+    if not g.get("competition_id"):
+        raise HTTPException(400, "Goal has no competition")
+
+    new_value = not g.get("is_tournament_best", False)
+
+    scope = {
+        "edition_id": g["edition_id"],
+        "competition_id": g["competition_id"],
+        "competition_type": g.get("competition_type"),
+    }
+
+    await db.goals.update_many(
+        scope,
+        {
+            "$set": {
+                "is_tournament_best": False,
+                "is_puskas": False,
+            }
+        },
+    )
+
+    if new_value:
+        await db.goals.update_one(
+            {"id": gid},
+            {
+                "$set": {
+                    "is_tournament_best": True,
+                    "is_puskas": False,
+                }
+            },
+        )
+
+    return {
+        "ok": True,
+        "goal_id": gid,
+        "is_tournament_best": new_value,
+    }
+
+
+@api_router.post("/goals/{gid}/mark-puskas")
+async def mark_puskas(gid: str):
+    g = await db.goals.find_one({"id": gid}, PROJECTION)
+
+    if not g:
+        raise HTTPException(404, "Goal not found")
+
+    if not g.get("is_tournament_best"):
+        raise HTTPException(
+            400,
+            "Primero marcá este gol como mejor gol del torneo.",
+        )
+
+    new_value = not g.get("is_puskas", False)
+
+    await db.goals.update_many(
+        {"edition_id": g["edition_id"]},
+        {"$set": {"is_puskas": False}},
+    )
+
+    if new_value:
+        await db.goals.update_one(
+            {"id": gid},
+            {"$set": {"is_puskas": True}},
+        )
+
+    return {
+        "ok": True,
+        "goal_id": gid,
+        "is_puskas": new_value,
+    }
 
 
 @api_router.post("/goals/{gid}/mark-tournament-best")
@@ -681,8 +840,12 @@ async def edition_summary(edition_id: str):
             player_ids.add(pid)
 
     ranking = []
-    for pid in player_ids:
-        s = await _compute_player_stats(pid, edition_id)
+
+    stats_list = await asyncio.gather(
+        *[_compute_player_stats(pid, edition_id) for pid in player_ids]
+    )
+
+    for s in stats_list:
         score = s["championships"] * 100 + s["cups"] * 30 + s["championship_points"] + s["goal_diff"]
         s["score"] = score
         ranking.append(s)
@@ -909,6 +1072,7 @@ async def finish_championship(cid: str):
 async def delete_championship(cid: str):
     await db.championships.delete_one({"id": cid})
     await db.matches.delete_many({"competition_id": cid, "competition_type": "championship"})
+    await db.goals.delete_many({"competition_id": cid, "competition_type": "championship"})
     return {"ok": True}
 
 
@@ -1134,6 +1298,7 @@ async def register_cup_match(cid: str, body: CupMatchInput):
 async def delete_cup(cid: str):
     await db.cups.delete_one({"id": cid})
     await db.matches.delete_many({"competition_id": cid, "competition_type": "cup"})
+    await db.goals.delete_many({"competition_id": cid, "competition_type": "cup"})
     return {"ok": True}
 
 
@@ -1141,9 +1306,14 @@ async def delete_cup(cid: str):
 @api_router.get("/rankings")
 async def rankings(edition_id: Optional[str] = None):
     players = await db.players.find({}, PROJECTION).to_list(1000)
+
+    stats_list = await asyncio.gather(
+        *[_compute_player_stats(p["id"], edition_id) for p in players]
+    )
+
     rows = []
-    for p in players:
-        s = await _compute_player_stats(p["id"], edition_id)
+
+    for p, s in zip(players, stats_list):
         s["player"] = p
         rows.append(s)
 

@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../src/api';
+import { api, requireAdmin } from '../../src/api';
+import { VideoPlayerModal } from '../../src/GoalsSection';
 import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Card, Pill, Btn } from '../../src/ui';
 import Avatar from '../../src/Avatar';
@@ -15,19 +16,28 @@ export default function EditionDetail() {
   const [champs, setChamps] = useState<any[]>([]);
   const [cups, setCups] = useState<any[]>([]);
   const [players, setPlayers] = useState<any[]>([]);
+  const [puskasCandidates, setPuskasCandidates] = useState<any[]>([]);
+  const [playGoal, setPlayGoal] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [s, cs, cps, pls] = await Promise.all([
+    const [s, cs, cps, pls, goals] = await Promise.all([
       api.editionSummary(id!),
       api.listChampionships(id!),
       api.listCups(id!),
       api.listPlayers(),
+      api.listGoals({
+        edition_id: id!,
+        is_tournament_best: true,
+        include_video: false,
+      }),
     ]);
+
     setSummary(s);
     setChamps(cs);
     setCups(cps);
     setPlayers(pls);
+    setPuskasCandidates(goals);
     setLoading(false);
   }, [id]);
 
@@ -43,6 +53,26 @@ export default function EditionDetail() {
 
   const pBy = (pid: string) => players.find((p) => p.id === pid);
   const bestPlayer = summary.best_player_id ? pBy(summary.best_player_id) : null;
+
+  const openGoalVideo = async (goal: any) => {
+    try {
+      const full = await api.getGoal(goal.id);
+      setPlayGoal(full);
+    } catch (e: any) {
+      window.alert('No se pudo abrir el video: ' + e.message);
+    }
+  };
+
+  const togglePuskas = async (gid: string) => {
+    if (!requireAdmin()) return;
+
+    try {
+      await api.markPuskas(gid);
+      await load();
+    } catch (e: any) {
+      window.alert('No se pudo marcar el Puskas: ' + e.message);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -67,6 +97,13 @@ export default function EditionDetail() {
             </View>
           </Card>
         ) : null}
+
+        <PuskasSection
+          goals={puskasCandidates}
+          players={players}
+          onPlay={openGoalVideo}
+          onMark={togglePuskas}
+        />
 
         {/* Ranking */}
         <Text style={styles.section}>Ranking</Text>
@@ -175,9 +212,99 @@ export default function EditionDetail() {
           })
         )}
       </ScrollView>
+
+      <VideoPlayerModal
+        visible={!!playGoal}
+        onClose={() => setPlayGoal(null)}
+        goal={playGoal}
+      />
     </SafeAreaView>
   );
 }
+
+function PuskasSection({
+    goals,
+    players,
+    onPlay,
+    onMark,
+  }: {
+    goals: any[];
+    players: any[];
+    onPlay: (goal: any) => void;
+    onMark: (gid: string) => void;
+  }) {
+    const pBy = (pid: string) => players.find((p) => p.id === pid);
+
+    return (
+      <>
+        <Text style={styles.section}>Premio Puskas de la edición</Text>
+
+        <Card style={{ borderColor: goals.some((g) => g.is_puskas) ? colors.gold : colors.border, borderWidth: 1 }}>
+          <Text style={styles.puskasHelp}>
+            Acá aparecen solo los goles que marcaste como “mejor gol del torneo” dentro de cada campeonato o copa.
+          </Text>
+
+          {goals.length === 0 ? (
+            <Text style={styles.empty}>
+              Todavía no hay candidatos. Entrá a un torneo o copa y marcá un gol con el trofeo.
+            </Text>
+          ) : (
+            <View style={{ gap: 10 }}>
+              {goals.map((g) => {
+                const p = pBy(g.player_id);
+
+                return (
+                  <View
+                    key={g.id}
+                    style={[styles.puskasCard, g.is_puskas && { borderColor: colors.gold, borderWidth: 1.5 }]}
+                  >
+                    <TouchableOpacity
+                      style={styles.puskasPlay}
+                      onPress={() => onPlay(g)}
+                      disabled={!g.has_video}
+                    >
+                      <Ionicons
+                        name={g.has_video ? 'play-circle' : 'film-outline'}
+                        size={30}
+                        color={g.has_video ? colors.gold : colors.textMuted}
+                      />
+                    </TouchableOpacity>
+
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={styles.puskasTitle} numberOfLines={1}>
+                          {g.title}
+                        </Text>
+
+                        {g.is_puskas ? (
+                          <Text style={styles.puskasTag}>PUSKAS</Text>
+                        ) : null}
+                      </View>
+
+                      <Text style={styles.puskasMeta}>
+                        {p?.name || 'Sin jugador'} · {g.competition_type === 'cup' ? 'Copa' : 'Campeonato'}
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() => onMark(g.id)}
+                      style={[styles.puskasBtn, g.is_puskas && { backgroundColor: colors.gold, borderColor: colors.gold }]}
+                    >
+                      <Ionicons
+                        name="star"
+                        size={18}
+                        color={g.is_puskas ? '#0A0B0E' : colors.gold}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </Card>
+      </>
+    );
+  }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
@@ -202,4 +329,63 @@ const styles = StyleSheet.create({
   tourTitle: { color: colors.text, fontFamily: fonts.bodyBold, fontSize: 14 },
   tourMeta: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: 12, marginTop: 2 },
   empty: { color: colors.textMuted, fontFamily: fonts.body, textAlign: 'center', padding: 8 },
+  puskasHelp: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  puskasCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+  },
+  puskasPlay: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.md,
+    backgroundColor: '#000',
+    borderColor: colors.border,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  puskasTitle: {
+    color: colors.text,
+    fontFamily: fonts.bodyBold,
+    fontSize: 14,
+    flex: 1,
+  },
+  puskasMeta: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  puskasTag: {
+    color: colors.gold,
+    fontFamily: fonts.bodyBold,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.gold,
+  },
+  puskasBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
 });
