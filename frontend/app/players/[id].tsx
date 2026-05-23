@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api, requireAdmin } from '../../src/api';
 import { colors, fonts, radius, spacing } from '../../src/theme';
@@ -16,13 +16,25 @@ export default function PlayerProfile() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [d, pls] = await Promise.all([api.playerProfile(id!), api.listPlayers()]);
-    setData(d);
-    setPlayers(pls);
-    setLoading(false);
+    if (!id) return;
+
+    setLoading(true);
+
+    try {
+      const d = await api.playerProfile(id);
+
+      setData(d);
+      setPlayers(d.players || []);
+    } catch (e: any) {
+      window.alert('No se pudo cargar el jugador: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => {
+    load();
+  }, [load]);
 
  const confirmDelete = async () => {
     if (!requireAdmin()) return;

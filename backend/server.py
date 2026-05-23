@@ -1064,6 +1064,15 @@ async def player_profile(player_id: str):
         raise HTTPException(404, "Player not found")
 
     players = await db.players.find({}, PROJECTION).to_list(1000)
+    players_compact = [
+        {
+            "id": p["id"],
+            "name": p["name"],
+            "nickname": p.get("nickname"),
+            "favorite_team": p.get("favorite_team"),
+        }
+        for p in players
+    ]
     editions = await db.editions.find({}, PROJECTION).sort("created_at", 1).to_list(1000)
     championships = await db.championships.find({}, PROJECTION).to_list(5000)
     cups = await db.cups.find({}, PROJECTION).to_list(5000)
@@ -1259,6 +1268,7 @@ async def player_profile(player_id: str):
 
     return {
         "player": player,
+        "players": players_compact,
         "overall": overall,
         "by_edition": by_edition,
         "championships_won": champs_won,
