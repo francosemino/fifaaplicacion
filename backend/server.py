@@ -33,30 +33,38 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api")
 
 
+
+
 @app.on_event("startup")
 async def ensure_indexes():
+    await db.editions.create_index([("id", 1)])
     await db.editions.create_index([("created_at", 1)])
+
+    await db.players.create_index([("id", 1)])
     await db.players.create_index([("name", 1)])
 
+    await db.championships.create_index([("id", 1)])
     await db.championships.create_index([("edition_id", 1), ("created_at", -1)])
     await db.championships.create_index([("champion_id", 1)])
     await db.championships.create_index([("runnerup_id", 1)])
 
+    await db.cups.create_index([("id", 1)])
     await db.cups.create_index([("edition_id", 1), ("created_at", -1)])
     await db.cups.create_index([("champion_id", 1)])
     await db.cups.create_index([("runnerup_id", 1)])
     await db.cups.create_index([("third_place_id", 1)])
 
+    await db.matches.create_index([("id", 1)])
     await db.matches.create_index([("competition_id", 1), ("competition_type", 1), ("date", 1)])
     await db.matches.create_index([("player1_id", 1)])
     await db.matches.create_index([("player2_id", 1)])
     await db.matches.create_index([("date", -1)])
 
+    await db.goals.create_index([("id", 1)])
     await db.goals.create_index([("edition_id", 1), ("created_at", -1)])
     await db.goals.create_index([("competition_id", 1), ("competition_type", 1), ("created_at", -1)])
     await db.goals.create_index([("edition_id", 1), ("is_tournament_best", 1)])
     await db.goals.create_index([("edition_id", 1), ("is_puskas", 1)])
-
 # ====================== MODELS ======================
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -583,6 +591,9 @@ async def get_current_puskas(
 
     g = await db.goals.find_one(q, proj)
 
+    if g:
+        g["has_video"] = bool(g.get("video_base64"))
+
     return g
 
 
@@ -627,7 +638,9 @@ async def delete_goal_video(gid: str):
     )
 
     updated = await db.goals.find_one({"id": gid}, PROJECTION)
-    updated["has_video"] = False
+
+    if updated:
+        updated["has_video"] = False
 
     return updated
 
@@ -711,90 +724,6 @@ async def mark_puskas(gid: str):
     }
 
 
-@api_router.post("/goals/{gid}/mark-tournament-best")
-async def mark_tournament_best(gid: str):
-    g = await db.goals.find_one({"id": gid}, PROJECTION)
-
-    if not g:
-        raise HTTPException(404, "Goal not found")
-
-    if not g.get("competition_id"):
-        raise HTTPException(400, "Goal has no competition")
-
-    new_value = not g.get("is_tournament_best", False)
-
-    scope = {
-        "edition_id": g["edition_id"],
-        "competition_id": g["competition_id"],
-        "competition_type": g.get("competition_type"),
-    }
-
-    await db.goals.update_many(
-        scope,
-        {"$set": {"is_tournament_best": False}},
-    )
-
-    if new_value:
-        await db.goals.update_one(
-            {"id": gid},
-            {"$set": {"is_tournament_best": True}},
-        )
-
-    return {
-        "ok": True,
-        "goal_id": gid,
-        "is_tournament_best": new_value,
-    }
-
-
-@api_router.post("/goals/{gid}/mark-puskas")
-async def mark_puskas(gid: str):
-    g = await db.goals.find_one({"id": gid}, PROJECTION)
-
-    if not g:
-        raise HTTPException(404, "Goal not found")
-
-    new_value = not g.get("is_puskas", False)
-
-    await db.goals.update_many(
-        {"edition_id": g["edition_id"]},
-        {"$set": {"is_puskas": False}},
-    )
-
-    if new_value:
-        await db.goals.update_one(
-            {"id": gid},
-            {"$set": {"is_puskas": True}},
-        )
-
-    return {
-        "ok": True,
-        "goal_id": gid,
-        "is_puskas": new_value,
-    }
-
-@api_router.delete("/goals/{gid}/video")
-async def delete_goal_video(gid: str):
-    g = await db.goals.find_one({"id": gid}, PROJECTION)
-
-    if not g:
-        raise HTTPException(404, "Goal not found")
-
-    await db.goals.update_one(
-        {"id": gid},
-        {
-            "$set": {
-                "video_base64": None,
-                "video_mime": None,
-            }
-        },
-    )
-
-    updated = await db.goals.find_one({"id": gid}, PROJECTION)
-    return updated
-    
-
-
 # ====================== ROUTES: EDITIONS ======================
 @api_router.get("/")
 async def root():
@@ -819,7 +748,23 @@ async def create_edition(body: EditionCreate):
 
 @api_router.delete("/editions/{edition_id}")
 async def delete_edition(edition_id: str):
+    champs = await db.championships.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
+    cups = await db.cups.find({"edition_id": edition_id}, PROJECTION).to_list(1000)
+
+    champ_ids = [c["id"] for c in champs]
+    cup_ids = [c["id"] for c in cups]
+    competition_ids = champ_ids + cup_ids
+
     await db.editions.delete_one({"id": edition_id})
+    await db.championships.delete_many({"edition_id": edition_id})
+    await db.cups.delete_many({"edition_id": edition_id})
+
+    if competition_ids:
+        await db.matches.delete_many({"competition_id": {"$in": competition_ids}})
+        await db.goals.delete_many({"competition_id": {"$in": competition_ids}})
+
+    await db.goals.delete_many({"edition_id": edition_id})
+
     return {"ok": True}
 
 
@@ -906,83 +851,411 @@ async def delete_player(player_id: str):
     await db.players.delete_one({"id": player_id})
     return {"ok": True}
 
+def _build_competition_edition_map(championships: List[dict], cups: List[dict]) -> Dict[str, str]:
+    comp_to_edition: Dict[str, str] = {}
+
+    for c in championships:
+        comp_to_edition[c["id"]] = c["edition_id"]
+
+    for c in cups:
+        comp_to_edition[c["id"]] = c["edition_id"]
+
+    return comp_to_edition
+
+
+def _player_ids_in_edition(
+    edition_id: str,
+    championships: List[dict],
+    cups: List[dict],
+    matches: List[dict],
+    comp_to_edition: Dict[str, str],
+) -> set:
+    ids = set()
+
+    for c in championships:
+        if c.get("edition_id") != edition_id:
+            continue
+
+        for part in c.get("participants", []):
+            if isinstance(part, dict) and part.get("player_id"):
+                ids.add(part["player_id"])
+
+    for cup in cups:
+        if cup.get("edition_id") != edition_id:
+            continue
+
+        for pid in cup.get("participants", []):
+            if pid:
+                ids.add(pid)
+
+    for m in matches:
+        if comp_to_edition.get(m.get("competition_id")) != edition_id:
+            continue
+
+        if m.get("player1_id"):
+            ids.add(m["player1_id"])
+
+        if m.get("player2_id"):
+            ids.add(m["player2_id"])
+
+    return ids
+
+
+def _compute_player_stats_prefetched(
+    player_id: str,
+    matches: List[dict],
+    championships: List[dict],
+    cups: List[dict],
+    comp_to_edition: Dict[str, str],
+    edition_id: Optional[str] = None,
+) -> dict:
+    scoped_matches = []
+
+    for m in matches:
+        if m.get("player1_id") != player_id and m.get("player2_id") != player_id:
+            continue
+
+        if edition_id and comp_to_edition.get(m.get("competition_id")) != edition_id:
+            continue
+
+        scoped_matches.append(m)
+
+    scoped_matches = sorted(scoped_matches, key=lambda x: x.get("date", ""))
+
+    played = won = drawn = lost = 0
+    gf = ga = 0
+    best_streak = 0
+    worst_streak = 0
+    cur_w = 0
+    cur_l = 0
+    biggest_win = None
+    biggest_loss = None
+
+    vs: Dict[str, dict] = defaultdict(
+        lambda: {
+            "played": 0,
+            "won": 0,
+            "drawn": 0,
+            "lost": 0,
+            "gf": 0,
+            "ga": 0,
+        }
+    )
+
+    championship_points = 0
+
+    for m in scoped_matches:
+        played += 1
+
+        if player_id == m["player1_id"]:
+            mine = m["goals1"]
+            theirs = m["goals2"]
+            opp = m["player2_id"]
+        else:
+            mine = m["goals2"]
+            theirs = m["goals1"]
+            opp = m["player1_id"]
+
+        gf += mine
+        ga += theirs
+
+        vs[opp]["played"] += 1
+        vs[opp]["gf"] += mine
+        vs[opp]["ga"] += theirs
+
+        res = _match_result_for(player_id, m)
+
+        if res == "W":
+            won += 1
+            vs[opp]["won"] += 1
+            cur_w += 1
+            cur_l = 0
+            best_streak = max(best_streak, cur_w)
+
+            diff = mine - theirs
+
+            if biggest_win is None or diff > biggest_win["diff"]:
+                biggest_win = {
+                    "diff": diff,
+                    "score": f"{mine}-{theirs}",
+                    "opponent_id": opp,
+                }
+
+            if m.get("competition_type") == "championship":
+                championship_points += 3
+
+        elif res == "L":
+            lost += 1
+            vs[opp]["lost"] += 1
+            cur_l += 1
+            cur_w = 0
+            worst_streak = max(worst_streak, cur_l)
+
+            diff = theirs - mine
+
+            if biggest_loss is None or diff > biggest_loss["diff"]:
+                biggest_loss = {
+                    "diff": diff,
+                    "score": f"{mine}-{theirs}",
+                    "opponent_id": opp,
+                }
+
+        else:
+            drawn += 1
+            vs[opp]["drawn"] += 1
+            cur_w = 0
+            cur_l = 0
+
+            if m.get("competition_type") == "championship":
+                championship_points += 1
+
+    scoped_championships = [
+        c for c in championships
+        if not edition_id or c.get("edition_id") == edition_id
+    ]
+
+    scoped_cups = [
+        c for c in cups
+        if not edition_id or c.get("edition_id") == edition_id
+    ]
+
+    champ_count = sum(1 for c in scoped_championships if c.get("champion_id") == player_id)
+    champ_runner_count = sum(1 for c in scoped_championships if c.get("runnerup_id") == player_id)
+
+    cup_count = sum(1 for c in scoped_cups if c.get("champion_id") == player_id)
+    cup_runner_count = sum(1 for c in scoped_cups if c.get("runnerup_id") == player_id)
+    cup_third_count = sum(1 for c in scoped_cups if c.get("third_place_id") == player_id)
+
+    win_pct = round((won / played) * 100, 1) if played else 0.0
+    avg_goals = round(gf / played, 2) if played else 0.0
+
+    return {
+        "player_id": player_id,
+        "edition_id": edition_id,
+        "played": played,
+        "won": won,
+        "drawn": drawn,
+        "lost": lost,
+        "goals_for": gf,
+        "goals_against": ga,
+        "goal_diff": gf - ga,
+        "win_pct": win_pct,
+        "avg_goals_per_match": avg_goals,
+        "championships": champ_count,
+        "championships_runnerup": champ_runner_count,
+        "cups": cup_count,
+        "cups_runnerup": cup_runner_count,
+        "cups_third": cup_third_count,
+        "finals_played": champ_runner_count + champ_count + cup_count + cup_runner_count,
+        "championship_points": championship_points,
+        "best_win_streak": best_streak,
+        "worst_loss_streak": worst_streak,
+        "biggest_win": biggest_win,
+        "biggest_loss": biggest_loss,
+        "vs_rivals": dict(vs),
+    }
+
 
 @api_router.get("/players/{player_id}/profile")
 async def player_profile(player_id: str):
     player = await db.players.find_one({"id": player_id}, PROJECTION)
+
     if not player:
         raise HTTPException(404, "Player not found")
-    overall = await _compute_player_stats(player_id)
-    editions = await db.editions.find({}, PROJECTION).sort("created_at", 1).to_list(1000)
-    by_edition = []
-    for ed in editions:
-        s = await _compute_player_stats(player_id, ed["id"])
-        by_edition.append({"edition": ed, "stats": s})
 
-    champs_won = await db.championships.find({"champion_id": player_id}, PROJECTION).to_list(1000)
-    champs_runner = await db.championships.find({"runnerup_id": player_id}, PROJECTION).to_list(1000)
-    cups_won = await db.cups.find({"champion_id": player_id}, PROJECTION).to_list(1000)
-    cups_runner = await db.cups.find({"runnerup_id": player_id}, PROJECTION).to_list(1000)
+    players = await db.players.find({}, PROJECTION).to_list(1000)
+    editions = await db.editions.find({}, PROJECTION).sort("created_at", 1).to_list(1000)
+    championships = await db.championships.find({}, PROJECTION).to_list(5000)
+    cups = await db.cups.find({}, PROJECTION).to_list(5000)
+    matches = await db.matches.find({}, PROJECTION).sort("date", 1).to_list(20000)
+
+    comp_to_edition = _build_competition_edition_map(championships, cups)
+
+    overall = _compute_player_stats_prefetched(
+        player_id,
+        matches,
+        championships,
+        cups,
+        comp_to_edition,
+    )
+
+    by_edition = []
+
+    for ed in editions:
+        stats = _compute_player_stats_prefetched(
+            player_id,
+            matches,
+            championships,
+            cups,
+            comp_to_edition,
+            ed["id"],
+        )
+
+        by_edition.append({
+            "edition": ed,
+            "stats": stats,
+        })
+
+    champs_won = [
+        c for c in championships
+        if c.get("champion_id") == player_id
+    ]
+
+    champs_runner = [
+        c for c in championships
+        if c.get("runnerup_id") == player_id
+    ]
+
+    cups_won = [
+        c for c in cups
+        if c.get("champion_id") == player_id
+    ]
+
+    cups_runner = [
+        c for c in cups
+        if c.get("runnerup_id") == player_id
+    ]
 
     badges = []
+
+    overall_by_player: Dict[str, dict] = {}
+
+    for p in players:
+        overall_by_player[p["id"]] = _compute_player_stats_prefetched(
+            p["id"],
+            matches,
+            championships,
+            cups,
+            comp_to_edition,
+        )
+
     for ed in editions:
-        summary = await edition_summary(ed["id"])
-        if summary["best_player_id"] == player_id:
-            badges.append({"type": "fifa_champion", "label": f"Campeón {ed['name']}", "tier": "gold", "edition_id": ed["id"]})
+        edition_player_ids = _player_ids_in_edition(
+            ed["id"],
+            championships,
+            cups,
+            matches,
+            comp_to_edition,
+        )
 
-    all_players = await db.players.find({}, PROJECTION).to_list(1000)
-    max_champ_count = 0
-    top_champ_player = None
-    for p in all_players:
-        c = await db.championships.count_documents({"champion_id": p["id"]})
-        if c > max_champ_count:
-            max_champ_count = c
-            top_champ_player = p["id"]
-    if max_champ_count > 0 and top_champ_player == player_id:
-        badges.append({"type": "king_of_championships", "label": "Rey de Campeonatos", "tier": "gold"})
+        best_player_id = None
+        best_score = None
 
-    max_cup_count = 0
-    top_cup_player = None
-    for p in all_players:
-        c = await db.cups.count_documents({"champion_id": p["id"]})
-        if c > max_cup_count:
-            max_cup_count = c
-            top_cup_player = p["id"]
-    if max_cup_count > 0 and top_cup_player == player_id:
-        badges.append({"type": "king_of_cups", "label": "Rey de Copas", "tier": "gold"})
+        for pid in edition_player_ids:
+            s = _compute_player_stats_prefetched(
+                pid,
+                matches,
+                championships,
+                cups,
+                comp_to_edition,
+                ed["id"],
+            )
 
-    max_gf = 0
-    top_gf = None
-    for p in all_players:
-        s = await _compute_player_stats(p["id"])
-        if s["goals_for"] > max_gf:
-            max_gf = s["goals_for"]
-            top_gf = p["id"]
-    if max_gf > 0 and top_gf == player_id:
-        badges.append({"type": "top_scorer", "label": "Goleador Histórico", "tier": "gold"})
+            score = (
+                s["championships"] * 100
+                + s["cups"] * 30
+                + s["championship_points"]
+                + s["goal_diff"]
+            )
 
-    min_ga_ratio = None
-    top_def = None
-    for p in all_players:
-        s = await _compute_player_stats(p["id"])
-        if s["played"] >= 5:
-            ratio = s["goals_against"] / s["played"]
-            if min_ga_ratio is None or ratio < min_ga_ratio:
-                min_ga_ratio = ratio
-                top_def = p["id"]
-    if top_def == player_id:
-        badges.append({"type": "iron_wall", "label": "Muro Defensivo", "tier": "silver"})
+            if best_score is None or score > best_score:
+                best_score = score
+                best_player_id = pid
 
-    max_finals_lost = 0
-    top_pecho = None
-    for p in all_players:
-        fl = await db.championships.count_documents({"runnerup_id": p["id"]})
-        fl += await db.cups.count_documents({"runnerup_id": p["id"]})
-        if fl > max_finals_lost:
-            max_finals_lost = fl
-            top_pecho = p["id"]
-    if max_finals_lost >= 2 and top_pecho == player_id:
-        badges.append({"type": "pecho_frio", "label": "Pecho Frío", "tier": "bronze"})
+        if best_player_id == player_id:
+            badges.append({
+                "type": "fifa_champion",
+                "label": f"Campeón {ed['name']}",
+                "tier": "gold",
+                "edition_id": ed["id"],
+            })
+
+    champ_wins_by_player: Dict[str, int] = defaultdict(int)
+
+    for c in championships:
+        if c.get("champion_id"):
+            champ_wins_by_player[c["champion_id"]] += 1
+
+    if champ_wins_by_player:
+        top_champ_player = max(champ_wins_by_player, key=champ_wins_by_player.get)
+
+        if champ_wins_by_player[top_champ_player] > 0 and top_champ_player == player_id:
+            badges.append({
+                "type": "king_of_championships",
+                "label": "Rey de Campeonatos",
+                "tier": "gold",
+            })
+
+    cup_wins_by_player: Dict[str, int] = defaultdict(int)
+
+    for c in cups:
+        if c.get("champion_id"):
+            cup_wins_by_player[c["champion_id"]] += 1
+
+    if cup_wins_by_player:
+        top_cup_player = max(cup_wins_by_player, key=cup_wins_by_player.get)
+
+        if cup_wins_by_player[top_cup_player] > 0 and top_cup_player == player_id:
+            badges.append({
+                "type": "king_of_cups",
+                "label": "Rey de Copas",
+                "tier": "gold",
+            })
+
+    top_gf_player = None
+    top_gf = 0
+
+    for pid, stats in overall_by_player.items():
+        if stats["goals_for"] > top_gf:
+            top_gf = stats["goals_for"]
+            top_gf_player = pid
+
+    if top_gf > 0 and top_gf_player == player_id:
+        badges.append({
+            "type": "top_scorer",
+            "label": "Goleador Histórico",
+            "tier": "gold",
+        })
+
+    best_def_player = None
+    best_def_ratio = None
+
+    for pid, stats in overall_by_player.items():
+        if stats["played"] < 5:
+            continue
+
+        ratio = stats["goals_against"] / stats["played"]
+
+        if best_def_ratio is None or ratio < best_def_ratio:
+            best_def_ratio = ratio
+            best_def_player = pid
+
+    if best_def_player == player_id:
+        badges.append({
+            "type": "iron_wall",
+            "label": "Muro Defensivo",
+            "tier": "silver",
+        })
+
+    finals_lost_by_player: Dict[str, int] = defaultdict(int)
+
+    for c in championships:
+        if c.get("runnerup_id"):
+            finals_lost_by_player[c["runnerup_id"]] += 1
+
+    for c in cups:
+        if c.get("runnerup_id"):
+            finals_lost_by_player[c["runnerup_id"]] += 1
+
+    if finals_lost_by_player:
+        top_pecho = max(finals_lost_by_player, key=finals_lost_by_player.get)
+
+        if finals_lost_by_player[top_pecho] >= 2 and top_pecho == player_id:
+            badges.append({
+                "type": "pecho_frio",
+                "label": "Pecho Frío",
+                "tier": "bronze",
+            })
 
     return {
         "player": player,
@@ -994,7 +1267,6 @@ async def player_profile(player_id: str):
         "cups_runnerup": cups_runner,
         "badges": badges,
     }
-
 
 # ====================== ROUTES: CHAMPIONSHIPS ======================
 @api_router.get("/championships", response_model=List[Championship])
@@ -1430,6 +1702,7 @@ async def seed_demo(reset: bool = True):
         await db.championships.delete_many({})
         await db.cups.delete_many({})
         await db.matches.delete_many({})
+        await db.goals.delete_many({})
 
     players_data = [
         {"name": "Franco", "favorite_team": "Real Madrid"},

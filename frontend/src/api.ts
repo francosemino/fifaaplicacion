@@ -32,15 +32,17 @@ export function requireAdmin(): boolean {
 }
 
 async function request(path: string, options: ApiOptions = {}) {
+  const { skipCache, ...fetchOptions } = options;
+
   const url = `${BASE}/api${path}`;
-  const method = (options.method || 'GET').toUpperCase();
+  const method = (fetchOptions.method || 'GET').toUpperCase();
   const isGet = method === 'GET';
 
-  if (isGet && !options.skipCache) {
-    const hit = cache.get(url);
+  if (isGet && !skipCache) {
+    const cached = cache.get(url);
 
-    if (hit && Date.now() - hit.time < CACHE_TTL_MS) {
-      return hit.data;
+    if (cached && Date.now() - cached.time < CACHE_TTL_MS) {
+      return cached.data;
     }
 
     const pending = inflight.get(url);
@@ -51,36 +53,40 @@ async function request(path: string, options: ApiOptions = {}) {
   }
 
   const promise = fetch(url, {
-    ...options,
+    ...fetchOptions,
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {}),
+      ...(fetchOptions.headers || {}),
     },
-  }).then(async (res) => {
-    const txt = await res.text();
+  })
+    .then(async (res) => {
+      const txt = await res.text();
 
-    if (!res.ok) {
-      throw new Error(`API ${res.status}: ${txt}`);
-    }
+      if (!res.ok) {
+        throw new Error(`API ${res.status}: ${txt}`);
+      }
 
-    const data = txt ? JSON.parse(txt) : null;
+      const data = txt ? JSON.parse(txt) : null;
 
-    if (isGet && !options.skipCache) {
-      cache.set(url, {
-        time: Date.now(),
-        data,
-      });
-    } else if (!isGet) {
-      clearApiCache();
-    }
+      if (isGet && !options.skipCache) {
+        cache.set(url, {
+          time: Date.now(),
+          data,
+        });
+      }
 
-    return data;
-  }).finally(() => {
-    if (isGet) {
-      inflight.delete(url);
-    }
-  });
+      if (!isGet) {
+        clearApiCache();
+      }
+
+      return data;
+    })
+    .finally(() => {
+      if (isGet) {
+        inflight.delete(url);
+      }
+    });
 
   if (isGet && !options.skipCache) {
     inflight.set(url, promise);
