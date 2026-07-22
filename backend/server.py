@@ -202,6 +202,19 @@ class MatchCreate(BaseModel):
     pen_goals2: Optional[int] = None
     date: Optional[str] = None
     notes: Optional[str] = None
+    
+    
+class MatchUpdate(BaseModel):
+    round_name: Optional[str] = None
+    team1: Optional[str] = None
+    team2: Optional[str] = None
+    goals1: Optional[int] = None
+    goals2: Optional[int] = None
+    extra_time: Optional[bool] = None
+    penalties: Optional[bool] = None
+    pen_goals1: Optional[int] = None
+    pen_goals2: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class Cup(BaseModel):
@@ -1386,6 +1399,52 @@ async def create_match(body: MatchCreate):
 async def delete_match(mid: str):
     await db.matches.delete_one({"id": mid})
     return {"ok": True}
+
+
+@api_router.put("/matches/{mid}", response_model=Match)
+async def update_match(mid: str, body: MatchUpdate):
+    existing = await db.matches.find_one({"id": mid}, PROJECTION)
+
+    if not existing:
+        raise HTTPException(404, "Match not found")
+
+    updates = {
+        k: v
+        for k, v in body.dict().items()
+        if v is not None
+    }
+
+    goals1 = updates.get("goals1", existing.get("goals1", 0))
+    goals2 = updates.get("goals2", existing.get("goals2", 0))
+    penalties = updates.get("penalties", existing.get("penalties", False))
+    pen_goals1 = updates.get("pen_goals1", existing.get("pen_goals1"))
+    pen_goals2 = updates.get("pen_goals2", existing.get("pen_goals2"))
+
+    if penalties and pen_goals1 is not None and pen_goals2 is not None:
+        if pen_goals1 > pen_goals2:
+            winner = existing["player1_id"]
+        elif pen_goals2 > pen_goals1:
+            winner = existing["player2_id"]
+        else:
+            winner = None
+    else:
+        if goals1 > goals2:
+            winner = existing["player1_id"]
+        elif goals2 > goals1:
+            winner = existing["player2_id"]
+        else:
+            winner = None
+
+    updates["winner_id"] = winner
+
+    await db.matches.update_one(
+        {"id": mid},
+        {"$set": updates},
+    )
+
+    updated = await db.matches.find_one({"id": mid}, PROJECTION)
+
+    return Match(**updated)
 
 
 @api_router.get("/matches")

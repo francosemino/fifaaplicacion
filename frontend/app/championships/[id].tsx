@@ -261,24 +261,23 @@ function EditMatchModal({ visible, match, players, onClose, onDone }: any) {
   const p2 = pBy(match.player2_id);
 
   const submit = async () => {
+    const goals1 = parseInt(g1, 10) || 0;
+    const goals2 = parseInt(g2, 10) || 0;
+
     try {
-      await api.deleteMatch(match.id);
-      await api.createMatch({
-        competition_id: match.competition_id,
-        competition_type: match.competition_type,
-        round_name: round || null,
-        player1_id: match.player1_id,
-        player2_id: match.player2_id,
-        team1: team1 || null,
-        team2: team2 || null,
-        goals1: parseInt(g1) || 0,
-        goals2: parseInt(g2) || 0,
+      await api.updateMatch(match.id, {
+        round_name: round.trim() || null,
+        team1: team1.trim() || null,
+        team2: team2.trim() || null,
+        goals1,
+        goals2,
       });
+
       onDone();
     } catch (e: any) {
       window.alert('Error: ' + e.message);
     }
-  };
+  }; 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -297,15 +296,22 @@ function EditMatchModal({ visible, match, players, onClose, onDone }: any) {
           <TextInput style={modalStyles.input} placeholder="Equipo visitante" placeholderTextColor={colors.textMuted} value={team2} onChangeText={setTeam2} />
 
           <Text style={modalStyles.label}>Resultado</Text>
-          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+
+          <View style={modalStyles.scoreRow}>
             <TextInput
-              style={[modalStyles.input, { flex: 1, textAlign: 'center', fontSize: 28, fontFamily: fonts.headingBlack }]}
-              keyboardType="numeric" value={g1} onChangeText={setG1}
+              style={modalStyles.scoreInput}
+              keyboardType="numeric"
+              value={g1}
+              onChangeText={setG1}
             />
-            <Text style={{ color: colors.textSecondary, fontFamily: fonts.headingBlack, fontSize: 22 }}>-</Text>
+
+            <Text style={modalStyles.scoreDash}>-</Text>
+
             <TextInput
-              style={[modalStyles.input, { flex: 1, textAlign: 'center', fontSize: 28, fontFamily: fonts.headingBlack }]}
-              keyboardType="numeric" value={g2} onChangeText={setG2}
+              style={modalStyles.scoreInput}
+              keyboardType="numeric"
+              value={g2}
+              onChangeText={setG2}
             />
           </View>
 
@@ -353,7 +359,7 @@ function AddMatchModal({ visible, onClose, onDone, participants, players, compet
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={modalStyles.bg}>
         <View style={modalStyles.card}>
-          <ScrollView>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={modalStyles.scrollContent}>
             <Text style={modalStyles.title}>Nuevo partido</Text>
             <Text style={modalStyles.label}>Fecha / Jornada (opcional)</Text>
             <TextInput style={modalStyles.input} placeholder="Ej: Fecha 3" placeholderTextColor={colors.textMuted} value={round} onChangeText={setRound} testID="match-round-input" />
@@ -389,10 +395,25 @@ function AddMatchModal({ visible, onClose, onDone, participants, players, compet
             <TextInput style={modalStyles.input} placeholder="Equipo visitante" placeholderTextColor={colors.textMuted} value={team2} onChangeText={setTeam2} />
 
             <Text style={modalStyles.label}>Resultado</Text>
-            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-              <TextInput style={[modalStyles.input, { flex: 1, textAlign: 'center', fontSize: 22 }]} keyboardType="numeric" value={g1} onChangeText={setG1} testID="match-g1-input" />
-              <Text style={{ color: colors.textSecondary, fontFamily: fonts.headingBlack, fontSize: 22 }}>-</Text>
-              <TextInput style={[modalStyles.input, { flex: 1, textAlign: 'center', fontSize: 22 }]} keyboardType="numeric" value={g2} onChangeText={setG2} testID="match-g2-input" />
+
+            <View style={modalStyles.scoreRow}>
+              <TextInput
+                style={modalStyles.scoreInput}
+                keyboardType="numeric"
+                value={g1}
+                onChangeText={setG1}
+                testID="match-g1-input"
+              />
+
+              <Text style={modalStyles.scoreDash}>-</Text>
+
+              <TextInput
+                style={modalStyles.scoreInput}
+                keyboardType="numeric"
+                value={g2}
+                onChangeText={setG2}
+                testID="match-g2-input"
+              />
             </View>
 
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
@@ -427,13 +448,112 @@ const styles = StyleSheet.create({
 });
 
 const modalStyles = StyleSheet.create({
-  bg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  card: { backgroundColor: colors.surface, padding: spacing.lg, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' },
-  title: { color: colors.text, fontFamily: fonts.headingBlack, fontSize: 22, marginBottom: 8 },
-  sub: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: 14, marginBottom: 12 },
-  label: { color: colors.textMuted, fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1.5, marginTop: 12, marginBottom: 6 },
-  input: { backgroundColor: colors.surfaceElevated, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md, padding: 12, color: colors.text, fontFamily: fonts.body, marginBottom: 4 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
-  chipActive: { backgroundColor: colors.gold, borderColor: colors.gold },
-  chipText: { color: colors.text, fontFamily: fonts.bodyBold, fontSize: 12 },
+  bg: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+
+  card: {
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '92%',
+  },
+
+  scrollContent: {
+    paddingBottom: 24,
+  },
+
+  title: {
+    color: colors.text,
+    fontFamily: fonts.headingBlack,
+    fontSize: 22,
+    marginBottom: 8,
+  },
+
+  sub: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    marginBottom: 12,
+  },
+
+  label: {
+    color: colors.textMuted,
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+
+  input: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: 12,
+    color: colors.text,
+    fontFamily: fonts.body,
+    marginBottom: 4,
+    width: '100%',
+  },
+
+  scoreRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    width: '100%',
+  },
+
+  scoreInput: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    color: colors.text,
+    fontFamily: fonts.headingBlack,
+    fontSize: 22,
+    textAlign: 'center',
+  },
+
+  scoreDash: {
+    color: colors.textSecondary,
+    fontFamily: fonts.headingBlack,
+    fontSize: 22,
+    width: 12,
+    textAlign: 'center',
+  },
+
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+  },
+
+  chipActive: {
+    backgroundColor: colors.gold,
+    borderColor: colors.gold,
+  },
+
+  chipText: {
+    color: colors.text,
+    fontFamily: fonts.bodyBold,
+    fontSize: 12,
+  },
 });

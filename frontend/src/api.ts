@@ -69,7 +69,7 @@ async function request(path: string, options: ApiOptions = {}) {
 
       const data = txt ? JSON.parse(txt) : null;
 
-      if (isGet && !options.skipCache) {
+      if (isGet && !skipCache) {
         cache.set(url, {
           time: Date.now(),
           data,
@@ -88,7 +88,7 @@ async function request(path: string, options: ApiOptions = {}) {
       }
     });
 
-  if (isGet && !options.skipCache) {
+  if (isGet && !skipCache) {
     inflight.set(url, promise);
   }
 
@@ -150,15 +150,22 @@ export const api = {
     }),
 
   // Matches
-  createMatch: (body: any) =>
-    request('/matches', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  deleteMatch: (id: string) =>
-    request(`/matches/${id}`, {
-      method: 'DELETE',
-    }),
+createMatch: (body: any) =>
+  request('/matches', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+
+deleteMatch: (id: string) =>
+  request(`/matches/${id}`, {
+    method: 'DELETE',
+  }),
+
+updateMatch: (id: string, body: any) =>
+  request(`/matches/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }),
 
   // Cups
   listCups: (editionId?: string) =>
