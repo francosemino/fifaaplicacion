@@ -149,7 +149,7 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Matches
+// Matches
 createMatch: (body: any) =>
   request('/matches', {
     method: 'POST',

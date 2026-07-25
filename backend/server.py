@@ -162,7 +162,8 @@ class ChampionshipCreate(BaseModel):
     edition_id: str
     name: str
     participants: List[ChampionshipParticipant]
-    rounds: int = 2
+    rounds: int = 1
+    generate_fixture: bool = False
 
 
 class Match(BaseModel):
@@ -176,6 +177,7 @@ class Match(BaseModel):
     team2: Optional[str] = None
     goals1: int = 0
     goals2: int = 0
+    played: bool = True
     extra_time: bool = False
     penalties: bool = False
     pen_goals1: Optional[int] = None
@@ -194,8 +196,9 @@ class MatchCreate(BaseModel):
     player2_id: str
     team1: Optional[str] = None
     team2: Optional[str] = None
-    goals1: int
-    goals2: int
+    goals1: int = 0
+    goals2: int = 0
+    played: bool = True
     extra_time: bool = False
     penalties: bool = False
     pen_goals1: Optional[int] = None
@@ -203,6 +206,20 @@ class MatchCreate(BaseModel):
     date: Optional[str] = None
     notes: Optional[str] = None
     
+    
+class MatchUpdate(BaseModel):
+    round_name: Optional[str] = None
+    team1: Optional[str] = None
+    team2: Optional[str] = None
+    goals1: Optional[int] = None
+    goals2: Optional[int] = None
+    played: Optional[bool] = None
+    extra_time: Optional[bool] = None
+    penalties: Optional[bool] = None
+    pen_goals1: Optional[int] = None
+    pen_goals2: Optional[int] = None
+    notes: Optional[str] = None
+
     
 class MatchUpdate(BaseModel):
     round_name: Optional[str] = None
@@ -270,6 +287,9 @@ async def _compute_standings(championship: dict) -> List[dict]:
     ).to_list(1000)
 
     for m in matches:
+        if not m.get("played", True):
+            continue
+        
         p1, p2 = m["player1_id"], m["player2_id"]
         g1, g2 = m["goals1"], m["goals2"]
         if p1 not in stats or p2 not in stats:
@@ -1301,10 +1321,123 @@ async def list_championships(edition_id: Optional[str] = None):
     return [Championship(**i) for i in items]
 
 
+def _shuffle_list(items: List[Any]) -> List[Any]:
+    import random
+    copied = list(items)
+    random.shuffle(copied)
+    return copied
+
+
+def _generate_round_robin_pairs(player_ids: List[str], rounds: int = 1) -> List[dict]:
+    import random
+
+    ids = list(player_ids)
+    random.shuffle(ids)
+
+    if len(ids) < 2:
+        return []
+
+    has_bye = len(ids) % 2 == 1
+
+    if has_bye:
+        ids.append(None)
+
+    n = len(ids)
+    rounds_count = n - 1
+    rotation = ids[:]
+    fixtures: List[dict] = []
+
+    for r in range(rounds_count):
+        matches = []
+
+        for i in range(n // 2):
+            a = rotation[i]
+            b = rotation[n - 1 - i]
+
+            if a is None or b is None:
+                continue
+
+            if (r + i) % 2 == 0:
+                home, away = a, b
+            else:
+                home, away = b, a
+
+            matches.append({
+                "round_name": f"Fecha {r + 1}",
+                "player1_id": home,
+                "player2_id": away,
+            })
+
+        fixtures.extend(matches)
+
+        rotation = [rotation[0]] + [rotation[-1]] + rotation[1:-1]
+
+    if rounds >= 2:
+        second_leg = []
+
+        for item in fixtures:
+            fecha_number = int(item["round_name"].replace("Fecha ", ""))
+            second_leg.append({
+                "round_name": f"Fecha {fecha_number + rounds_count}",
+                "player1_id": item["player2_id"],
+                "player2_id": item["player1_id"],
+            })
+
+        fixtures.extend(second_leg)
+
+    return fixtures
+
+
 @api_router.post("/championships", response_model=Championship)
 async def create_championship(body: ChampionshipCreate):
-    c = Championship(**body.dict())
+    participants = body.participants
+
+    if len(participants) < 2:
+        raise HTTPException(400, "El campeonato necesita al menos 2 participantes")
+
+    c = Championship(
+        edition_id=body.edition_id,
+        name=body.name,
+        participants=participants,
+        rounds=body.rounds,
+    )
+
     await db.championships.insert_one(c.dict())
+
+    if body.generate_fixture:
+        player_ids = [p.player_id for p in participants]
+        team_map = {p.player_id: p.team_name for p in participants}
+
+        fixtures = _generate_round_robin_pairs(
+            player_ids,
+            rounds=2 if body.rounds >= 2 else 1,
+        )
+
+        docs = []
+
+        for fx in fixtures:
+            p1 = fx["player1_id"]
+            p2 = fx["player2_id"]
+
+            m = Match(
+                competition_id=c.id,
+                competition_type="championship",
+                round_name=fx["round_name"],
+                player1_id=p1,
+                player2_id=p2,
+                team1=team_map.get(p1),
+                team2=team_map.get(p2),
+                goals1=0,
+                goals2=0,
+                played=False,
+                winner_id=None,
+            )
+
+            docs.append(m.dict())
+
+        if docs:
+            await db.matches.insert_many(docs)
+
     return c
 
 
@@ -1375,14 +1508,25 @@ async def delete_championship(cid: str):
 @api_router.post("/matches", response_model=Match)
 async def create_match(body: MatchCreate):
     data = body.dict()
+
     if data.get("date") is None:
         data["date"] = now_iso()
+
+    if not data.get("played", True):
+        data["winner_id"] = None
+        m = Match(**data)
+        await db.matches.insert_one(m.dict())
+        return m
+
     g1, g2 = data["goals1"], data["goals2"]
+
     if data.get("penalties") and data.get("pen_goals1") is not None and data.get("pen_goals2") is not None:
         if data["pen_goals1"] > data["pen_goals2"]:
             winner = data["player1_id"]
-        else:
+        elif data["pen_goals2"] > data["pen_goals1"]:
             winner = data["player2_id"]
+        else:
+            winner = None
     else:
         if g1 > g2:
             winner = data["player1_id"]
@@ -1390,15 +1534,61 @@ async def create_match(body: MatchCreate):
             winner = data["player2_id"]
         else:
             winner = None
+
     m = Match(**data, winner_id=winner)
+
     await db.matches.insert_one(m.dict())
+
     return m
 
 
-@api_router.delete("/matches/{mid}")
-async def delete_match(mid: str):
-    await db.matches.delete_one({"id": mid})
-    return {"ok": True}
+@api_router.put("/matches/{mid}", response_model=Match)
+async def update_match(mid: str, body: MatchUpdate):
+    existing = await db.matches.find_one({"id": mid}, PROJECTION)
+
+    if not existing:
+        raise HTTPException(404, "Match not found")
+
+    updates = {
+        k: v
+        for k, v in body.dict().items()
+        if v is not None
+    }
+
+    goals1 = updates.get("goals1", existing.get("goals1", 0))
+    goals2 = updates.get("goals2", existing.get("goals2", 0))
+    played = updates.get("played", True)
+    penalties = updates.get("penalties", existing.get("penalties", False))
+    pen_goals1 = updates.get("pen_goals1", existing.get("pen_goals1"))
+    pen_goals2 = updates.get("pen_goals2", existing.get("pen_goals2"))
+
+    if not played:
+        winner = None
+    elif penalties and pen_goals1 is not None and pen_goals2 is not None:
+        if pen_goals1 > pen_goals2:
+            winner = existing["player1_id"]
+        elif pen_goals2 > pen_goals1:
+            winner = existing["player2_id"]
+        else:
+            winner = None
+    else:
+        if goals1 > goals2:
+            winner = existing["player1_id"]
+        elif goals2 > goals1:
+            winner = existing["player2_id"]
+        else:
+            winner = None
+
+    updates["winner_id"] = winner
+
+    await db.matches.update_one(
+        {"id": mid},
+        {"$set": updates},
+    )
+
+    updated = await db.matches.find_one({"id": mid}, PROJECTION)
+
+    return Match(**updated)
 
 
 @api_router.put("/matches/{mid}", response_model=Match)

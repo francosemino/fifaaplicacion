@@ -67,6 +67,7 @@ export default function ChampionshipDetail() {
   }
 
   const { championship: c, standings, matches, awards } = data;
+  const playedMatches = matches.filter((m: any) => m.played);
   const champ = c.champion_id ? pBy(c.champion_id) : null;
 
   return (
@@ -125,7 +126,7 @@ export default function ChampionshipDetail() {
           })}
         </Card>
 
-        {matches.length > 0 ? (
+        {playedMatches.length > 0 ? (
           <>
             <Text style={styles.section}>Premios del torneo</Text>
             <View style={{ gap: 8 }}>
@@ -169,13 +170,13 @@ export default function ChampionshipDetail() {
                     <Text style={[styles.matchTeam, m.goals1 > m.goals2 && { color: colors.gold }]}>
                       {p1?.name}
                     </Text>
-                    <Text style={styles.matchScore}>{m.goals1}</Text>
+                    <Text style={styles.matchScore}>{m.played ? m.goals1 : '-'}</Text>
                   </View>
                   <View style={styles.matchRow}>
                     <Text style={[styles.matchTeam, m.goals2 > m.goals1 && { color: colors.gold }]}>
                       {p2?.name}
                     </Text>
-                    <Text style={styles.matchScore}>{m.goals2}</Text>
+                    <Text style={styles.matchScore}>{m.played ? m.goals2 : '-'}</Text>
                   </View>
                   {m.team1 || m.team2 ? (
                     <Text style={styles.matchMeta}>
@@ -184,6 +185,9 @@ export default function ChampionshipDetail() {
                     </Text>
                   ) : m.round_name ? (
                     <Text style={styles.matchMeta}>{m.round_name}</Text>
+                  ) : null}
+                  {!m.played ? (
+                    <Text style={styles.pendingText}>Pendiente</Text>
                   ) : null}
                 </View>
                 <TouchableOpacity onPress={() => openEditMatch(m)} style={{ padding: 8 }}>
@@ -271,54 +275,75 @@ function EditMatchModal({ visible, match, players, onClose, onDone }: any) {
         team2: team2.trim() || null,
         goals1,
         goals2,
+        played: true,
       });
 
       onDone();
     } catch (e: any) {
       window.alert('Error: ' + e.message);
     }
-  }; 
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={modalStyles.bg}>
         <View style={modalStyles.card}>
-          <Text style={modalStyles.title}>Editar partido</Text>
-          <Text style={modalStyles.sub}>{p1?.name} vs {p2?.name}</Text>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={modalStyles.scrollContent}>
+            <Text style={modalStyles.title}>Editar partido</Text>
+            <Text style={modalStyles.sub}>{p1?.name} vs {p2?.name}</Text>
 
-          <Text style={modalStyles.label}>Fecha / Jornada</Text>
-          <TextInput style={modalStyles.input} placeholder="Ej: Fecha 3" placeholderTextColor={colors.textMuted} value={round} onChangeText={setRound} />
-
-          <Text style={modalStyles.label}>Equipo {p1?.name}</Text>
-          <TextInput style={modalStyles.input} placeholder="Equipo local" placeholderTextColor={colors.textMuted} value={team1} onChangeText={setTeam1} />
-
-          <Text style={modalStyles.label}>Equipo {p2?.name}</Text>
-          <TextInput style={modalStyles.input} placeholder="Equipo visitante" placeholderTextColor={colors.textMuted} value={team2} onChangeText={setTeam2} />
-
-          <Text style={modalStyles.label}>Resultado</Text>
-
-          <View style={modalStyles.scoreRow}>
+            <Text style={modalStyles.label}>Fecha / Jornada</Text>
             <TextInput
-              style={modalStyles.scoreInput}
-              keyboardType="numeric"
-              value={g1}
-              onChangeText={setG1}
+              style={modalStyles.input}
+              placeholder="Ej: Fecha 3"
+              placeholderTextColor={colors.textMuted}
+              value={round}
+              onChangeText={setRound}
             />
 
-            <Text style={modalStyles.scoreDash}>-</Text>
-
+            <Text style={modalStyles.label}>Equipo {p1?.name}</Text>
             <TextInput
-              style={modalStyles.scoreInput}
-              keyboardType="numeric"
-              value={g2}
-              onChangeText={setG2}
+              style={modalStyles.input}
+              placeholder="Equipo local"
+              placeholderTextColor={colors.textMuted}
+              value={team1}
+              onChangeText={setTeam1}
             />
-          </View>
 
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-            <Btn label="Cancelar" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
-            <Btn label="Guardar" onPress={submit} style={{ flex: 1 }} />
-          </View>
+            <Text style={modalStyles.label}>Equipo {p2?.name}</Text>
+            <TextInput
+              style={modalStyles.input}
+              placeholder="Equipo visitante"
+              placeholderTextColor={colors.textMuted}
+              value={team2}
+              onChangeText={setTeam2}
+            />
+
+            <Text style={modalStyles.label}>Resultado</Text>
+
+            <View style={modalStyles.scoreRow}>
+              <TextInput
+                style={modalStyles.scoreInput}
+                keyboardType="numeric"
+                value={g1}
+                onChangeText={setG1}
+              />
+
+              <Text style={modalStyles.scoreDash}>-</Text>
+
+              <TextInput
+                style={modalStyles.scoreInput}
+                keyboardType="numeric"
+                value={g2}
+                onChangeText={setG2}
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <Btn label="Cancelar" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
+              <Btn label="Guardar" onPress={submit} style={{ flex: 1 }} />
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -343,7 +368,9 @@ function AddMatchModal({ visible, onClose, onDone, participants, players, compet
     if (!p1 || !p2 || p1 === p2) { window.alert('Elegí dos jugadores distintos'); return; }
     try {
       await api.createMatch({
-        competition_id: competitionId, competition_type: 'championship',
+        competition_id: competitionId,
+        competition_type: 'championship',
+        played: true,
         round_name: round || null, player1_id: p1, player2_id: p2,
         team1: team1 || null, team2: team2 || null,
         goals1: parseInt(g1) || 0, goals2: parseInt(g2) || 0,
@@ -444,6 +471,7 @@ const styles = StyleSheet.create({
   matchTeam: { color: colors.text, fontFamily: fonts.bodyBold, fontSize: 15 },
   matchScore: { color: colors.text, fontFamily: fonts.headingBlack, fontSize: 22 },
   matchMeta: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11, marginTop: 4 },
+  pendingText: {color: colors.gold,fontFamily: fonts.bodyBold,fontSize: 11,marginTop: 4,},
   empty: { color: colors.textMuted, fontFamily: fonts.body, textAlign: 'center', padding: 12 },
 });
 
