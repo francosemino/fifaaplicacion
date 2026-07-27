@@ -1557,7 +1557,9 @@ async def update_match(mid: str, body: MatchUpdate):
 
     goals1 = updates.get("goals1", existing.get("goals1", 0))
     goals2 = updates.get("goals2", existing.get("goals2", 0))
-    played = updates.get("played", True)
+
+    played = updates.get("played", existing.get("played", False))
+
     penalties = updates.get("penalties", existing.get("penalties", False))
     pen_goals1 = updates.get("pen_goals1", existing.get("pen_goals1"))
     pen_goals2 = updates.get("pen_goals2", existing.get("pen_goals2"))
@@ -1579,52 +1581,9 @@ async def update_match(mid: str, body: MatchUpdate):
         else:
             winner = None
 
-    updates["winner_id"] = winner
-
-    await db.matches.update_one(
-        {"id": mid},
-        {"$set": updates},
-    )
-
-    updated = await db.matches.find_one({"id": mid}, PROJECTION)
-
-    return Match(**updated)
-
-
-@api_router.put("/matches/{mid}", response_model=Match)
-async def update_match(mid: str, body: MatchUpdate):
-    existing = await db.matches.find_one({"id": mid}, PROJECTION)
-
-    if not existing:
-        raise HTTPException(404, "Match not found")
-
-    updates = {
-        k: v
-        for k, v in body.dict().items()
-        if v is not None
-    }
-
-    goals1 = updates.get("goals1", existing.get("goals1", 0))
-    goals2 = updates.get("goals2", existing.get("goals2", 0))
-    penalties = updates.get("penalties", existing.get("penalties", False))
-    pen_goals1 = updates.get("pen_goals1", existing.get("pen_goals1"))
-    pen_goals2 = updates.get("pen_goals2", existing.get("pen_goals2"))
-
-    if penalties and pen_goals1 is not None and pen_goals2 is not None:
-        if pen_goals1 > pen_goals2:
-            winner = existing["player1_id"]
-        elif pen_goals2 > pen_goals1:
-            winner = existing["player2_id"]
-        else:
-            winner = None
-    else:
-        if goals1 > goals2:
-            winner = existing["player1_id"]
-        elif goals2 > goals1:
-            winner = existing["player2_id"]
-        else:
-            winner = None
-
+    updates["goals1"] = goals1
+    updates["goals2"] = goals2
+    updates["played"] = played
     updates["winner_id"] = winner
 
     await db.matches.update_one(

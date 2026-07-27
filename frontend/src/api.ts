@@ -139,7 +139,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  getChampionship: (id: string) => request(`/championships/${id}`),
+  getChampionship: (id: string, options: { skipCache?: boolean } = {}) =>
+    request(`/championships/${id}`, options),
   finishChampionship: (id: string) =>
     request(`/championships/${id}/finish`, {
       method: 'POST',

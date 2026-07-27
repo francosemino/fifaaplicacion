@@ -19,7 +19,10 @@ export default function ChampionshipDetail() {
   const [editMatch, setEditMatch] = useState<any>(null);
 
   const load = useCallback(async () => {
-    const [d, pls] = await Promise.all([api.getChampionship(id!), api.listPlayers()]);
+    const [d, pls] = await Promise.all([
+      api.getChampionship(id!, { skipCache: true }),
+      api.listPlayers(),
+    ]);
     setData(d);
     setPlayers(pls);
     setLoading(false);
