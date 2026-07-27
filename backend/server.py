@@ -220,19 +220,6 @@ class MatchUpdate(BaseModel):
     pen_goals2: Optional[int] = None
     notes: Optional[str] = None
 
-    
-class MatchUpdate(BaseModel):
-    round_name: Optional[str] = None
-    team1: Optional[str] = None
-    team2: Optional[str] = None
-    goals1: Optional[int] = None
-    goals2: Optional[int] = None
-    extra_time: Optional[bool] = None
-    penalties: Optional[bool] = None
-    pen_goals1: Optional[int] = None
-    pen_goals2: Optional[int] = None
-    notes: Optional[str] = None
-
 
 class Cup(BaseModel):
     id: str = Field(default_factory=new_id)
