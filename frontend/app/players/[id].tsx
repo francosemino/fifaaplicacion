@@ -8,6 +8,17 @@ import { colors, fonts, radius, spacing } from '../../src/theme';
 import { ScreenHeader, Card, StatBox, Pill } from '../../src/ui';
 import Avatar from '../../src/Avatar';
 
+// Momentos vergonzosos registrados a mano, por nombre de jugador (en minúsculas).
+const SHAME_RECORDS: Record<string, { date: string; title: string; detail: string }[]> = {
+  tocruz: [
+    {
+      date: '10/10/2026',
+      title: 'Abandonó el torneo',
+      detail: 'Se fue a mitad del torneo por malo y se retiró puteando a todos.',
+    },
+  ],
+};
+
 export default function PlayerProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -55,6 +66,7 @@ export default function PlayerProfile() {
   const { player, overall, by_edition, badges, championships_won, cups_won } = data;
   const pBy = (pid: string) => players.find((p) => p.id === pid);
   const rivals = Object.entries(overall.vs_rivals || {}) as [string, any][];
+  const shame = SHAME_RECORDS[(player.name || '').trim().toLowerCase()] || [];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -82,6 +94,25 @@ export default function PlayerProfile() {
             </View>
           </View>
         </View>
+
+        {/* Muro de la vergüenza */}
+        {shame.length > 0 ? (
+          <View>
+            <Text style={[styles.section, { color: colors.danger }]}>🚩 Muro de la vergüenza</Text>
+            <View style={{ gap: 8, marginTop: 8 }}>
+              {shame.map((s, idx) => (
+                <View key={idx} style={styles.shameCard} testID={`shame-${idx}`}>
+                  <Text style={{ fontSize: 24 }}>🏳️</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.shameTitle}>{s.title}</Text>
+                    <Text style={styles.shameDate}>{s.date}</Text>
+                    <Text style={styles.shameDetail}>{s.detail}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {/* Badges */}
         {badges.length > 0 ? (
@@ -280,5 +311,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12,
     backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md,
   },
+  shameCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 12,
+    backgroundColor: colors.surface, borderColor: colors.danger, borderWidth: 1, borderRadius: radius.md,
+  },
+  shameTitle: { color: colors.danger, fontFamily: fonts.headingBlack, fontSize: 16 },
+  shameDate: { color: colors.textMuted, fontFamily: fonts.bodyBold, fontSize: 11, letterSpacing: 1, marginTop: 2 },
+  shameDetail: { color: colors.text, fontFamily: fonts.body, fontSize: 13, marginTop: 6 },
   histText: { color: colors.text, fontFamily: fonts.body, fontSize: 14 },
 });
