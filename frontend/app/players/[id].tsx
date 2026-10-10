@@ -14,7 +14,7 @@ const SHAME_RECORDS: Record<string, { date: string; title: string; detail: strin
     {
       date: '10/10/2026',
       title: 'Abandonó el torneo',
-      detail: 'Se fue a mitad del torneo por malo y se retiró puteando a todos.',
+      detail: 'Se retiró a la mitad del torneo puteando a todos.',
     },
   ],
 };
@@ -95,11 +95,10 @@ export default function PlayerProfile() {
           </View>
         </View>
 
-        {/* Muro de la vergüenza */}
+        {/* Momentos vergonzosos */}
         {shame.length > 0 ? (
           <View>
-            <Text style={[styles.section, { color: colors.danger }]}>🚩 Muro de la vergüenza</Text>
-            <View style={{ gap: 8, marginTop: 8 }}>
+            <View style={{ gap: 8 }}>
               {shame.map((s, idx) => (
                 <View key={idx} style={styles.shameCard} testID={`shame-${idx}`}>
                   <Text style={{ fontSize: 24 }}>🏳️</Text>
